@@ -3,11 +3,11 @@ import EmergencyStatusCard from "../components/emergency/EmergencyStatusCard.jsx
 
 export default function EmergencyConfirmPage() {
   return (
-    <div className="page-layout">
+    <div className="flex flex-col min-h-screen relative z-[1]">
       <Navbar />
-      <main className="page-content">
-        <h1 className="page-heading">Help is on the way</h1>
-        <p className="page-subheading">Emergency services and contacts have been notified — S2</p>
+      <main className="flex-1 p-6 max-w-[1100px] mx-auto w-full">
+        <h1 className="text-[1.4rem] font-bold text-fg mb-1">Help is on the way</h1>
+        <p className="text-sm text-muted mb-6">Emergency services and contacts have been notified</p>
         <EmergencyStatusCard />
       </main>
     </div>
