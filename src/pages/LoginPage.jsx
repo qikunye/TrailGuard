@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.js";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../firebase/firebase.js";
@@ -111,6 +111,13 @@ export default function LoginPage() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-6 relative z-[1]">
+      <Link to="/" className="flex items-center gap-1.5 text-sm text-muted no-underline hover:text-fg transition-colors mb-6 self-start absolute top-6 left-6">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M19 12H5M12 5l-7 7 7 7"/>
+        </svg>
+        Back
+      </Link>
+
       <div className="flex items-center gap-2 text-[1.1rem] font-bold tracking-[0.12em] uppercase text-primary mb-5">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M3 20l5-9 4 6 3-4 6 7"/><circle cx="17" cy="6" r="2"/>
