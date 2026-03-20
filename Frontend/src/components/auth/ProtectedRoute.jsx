@@ -6,7 +6,7 @@ export default function ProtectedRoute() {
   const { currentUser } = useAuth();
 
   if (currentUser === undefined) return <LoadingSpinner />;
-  if (!currentUser) return <Navigate to="/login" replace />;
+  if (!currentUser) return <Navigate to="/" replace />;
 
   return <Outlet />;
 }
