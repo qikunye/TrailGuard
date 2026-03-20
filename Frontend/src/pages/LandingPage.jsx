@@ -9,7 +9,7 @@ const features = [
       </svg>
     ),
     title: "Trail Assessment",
-    desc: "AI-powered safety scores before you step on the trail.",
+    desc: "Safety scores before you step on the trail.",
   },
   {
     icon: (
@@ -45,7 +45,7 @@ const features = [
 const stats = [
   { value: "500+", label: "Trails" },
   { value: "24/7", label: "Support" },
-  { value: "AI", label: "Powered" },
+
   { value: "SG", label: "Ready" },
 ];
 
@@ -77,7 +77,7 @@ export default function LandingPage() {
         </div>
 
         {/* Trail animation */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none select-none" style={{ opacity: 0.4 }}>
           <svg
             viewBox="0 0 1200 600"
             preserveAspectRatio="xMidYMid slice"
@@ -124,7 +124,7 @@ export default function LandingPage() {
                 strokeWidth="2"
                 strokeLinecap="round"
                 filter="url(#trailGlow)"
-                opacity="0.7"
+                opacity="0.3"
                 style={{
                   strokeDasharray: 2000,
                   strokeDashoffset: 2000,
@@ -183,12 +183,12 @@ export default function LandingPage() {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 bg-white/5 border border-white/10 text-muted text-xs font-medium px-4 py-2 rounded-full mb-8">
             <span className="w-2 h-2 rounded-full bg-primary"></span>
-            AI-Powered Trail Safety
+            Trail Safety
           </div>
 
           {/* Main headline - TrailGuard */}
-          <h1 className="text-6xl md:text-8xl lg:text-9xl font-bold text-fg leading-none mb-6 tracking-tight">
-            Trail<span className="text-primary">Guard</span>
+          <h1 className="text-6xl md:text-8xl lg:text-9xl font-bold leading-none mb-6 tracking-tight">
+            <span style={{ color: "transparent", WebkitTextStroke: "1.5px white" }}>Trail</span><span className="text-primary">Guard</span>
           </h1>
 
           {/* Caption */}
@@ -226,11 +226,16 @@ export default function LandingPage() {
       </section>
 
       {/* Stats */}
-      <section className="border-y border-white/5 bg-white/[0.02] py-8">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto px-6">
+      <section className="py-16">
+        <div className="flex flex-row justify-center gap-8 px-6 md:gap-16 md:px-12">
           {stats.map((s, i) => (
             <div key={i} className="flex flex-col items-center text-center">
-              <div className="text-3xl md:text-4xl font-bold text-fg leading-none mb-1">{s.value}</div>
+              <div
+                className="text-3xl md:text-4xl font-bold text-fg leading-none mb-1"
+                style={{ textShadow: "0 0 20px rgba(74,222,128,0.7), 0 0 40px rgba(74,222,128,0.4)" }}
+              >
+                {s.value}
+              </div>
               <div className="text-sm text-muted">{s.label}</div>
             </div>
           ))}
@@ -241,7 +246,7 @@ export default function LandingPage() {
       <section className="py-20 md:py-28 px-6 max-w-6xl mx-auto w-full">
         <div className="text-center mb-16">
           <h2 className="text-3xl md:text-4xl font-bold text-fg mb-4">Everything you need on the trail</h2>
-          <p className="text-lg text-muted">Powered by AI, designed for Singapore hikers</p>
+          <p className="text-lg text-muted">Designed for Singapore hikers</p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
