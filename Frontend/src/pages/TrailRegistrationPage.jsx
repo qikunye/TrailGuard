@@ -50,7 +50,11 @@ export default function TrailRegistrationPage() {
 
         <TrailMap />
 
-        <form className="bg-card border border-line rounded-2xl p-6" onSubmit={e => { e.preventDefault(); setSubmitted(true); }}>
+        <form className="bg-card border border-line rounded-2xl p-6" onSubmit={e => {
+          e.preventDefault();
+          localStorage.setItem("upcomingHike", JSON.stringify({ ...form, registeredAt: Date.now() }));
+          setSubmitted(true);
+        }}>
           <h2 className="text-[0.95rem] font-semibold text-fg mb-4">Hike Details</h2>
 
           <div className="mb-4">

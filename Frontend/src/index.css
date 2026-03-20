@@ -1,46 +1,69 @@
 @import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+/* Override Leaflet map tiles to match dark theme */
+.leaflet-tile-pane { filter: brightness(0.85) saturate(0.8); }
+.leaflet-control-attribution { display: none !important; }
+.leaflet-control-zoom { display: none !important; }
 
 @theme {
-  --color-bg:           #07100a;
-  --color-card:         #0e1a10;
-  --color-surface:      #152018;
-  --color-line:         #233d29;
-  --color-primary:      #5c9e40;
-  --color-fg:           #c8ddb0;
-  --color-muted:        #618055;
-  --color-link:         #7ec85a;
-  --color-red:          #e07070;
-  --color-red-bg:       #2a1212;
-  --color-red-line:     #5a1a1a;
-  --color-amber:        #e0b870;
-  --color-amber-bg:     #2a1f0a;
-  --color-amber-line:   #5a3a0a;
-  --color-green:        #6ccf5a;
-  --color-green-bg:     #0d2212;
-  --color-green-line:   #1a4a1a;
+  /* Balanced dark theme - green as accent, not dominant */
+  --color-bg:           #0a0f0d;
+  --color-card:         #12181588;
+  --color-surface:      #1a2420;
+  --color-line:         #2a3a32;
+  --color-primary:      #4ade80;
+  --color-primary-dim:  #22c55e;
+  --color-fg:           #f0fdf4;
+  --color-muted:        #94a3b8;
+  --color-link:         #4ade80;
+  --color-red:          #f87171;
+  --color-red-bg:       #1c1917;
+  --color-red-line:     #44403c;
+  --color-amber:        #fbbf24;
+  --color-amber-bg:     #1c1917;
+  --color-amber-line:   #44403c;
+  --color-green:        #4ade80;
+  --color-green-bg:     #0f1f17;
+  --color-green-line:   #1a4a2e;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   font-family: system-ui, -apple-system, sans-serif;
-  background-color: var(--color-bg);
-  background-image:
-    radial-gradient(ellipse at 30% 20%, rgba(30, 70, 20, 0.35) 0%, transparent 55%),
-    radial-gradient(ellipse at 75% 85%, rgba(15, 50, 15, 0.30) 0%, transparent 50%);
+  background: var(--color-bg);
   min-height: 100vh;
   color: var(--color-fg);
   position: relative;
 }
 
+/* Gradient mesh background */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
-  background-image:
-    radial-gradient(circle, rgba(180, 230, 120, 0.55) 1px, transparent 1px),
-    radial-gradient(circle, rgba(180, 230, 120, 0.35) 1px, transparent 1px),
-    radial-gradient(circle, rgba(180, 230, 120, 0.45) 1px, transparent 1px);
-  background-size: 180px 160px, 260px 220px, 130px 200px;
-  background-position: 20px 40px, 80px 100px, 140px 30px;
+  background:
+    radial-gradient(ellipse 50% 80% at 20% 0%, rgba(74, 222, 128, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 50% at 80% 20%, rgba(59, 130, 246, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 40% 40% at 50% 100%, rgba(74, 222, 128, 0.04) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Subtle noise texture */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
   pointer-events: none;
   z-index: 0;
 }
@@ -50,6 +73,61 @@ input[type="time"] {
   color-scheme: dark;
 }
 
+/* Glass effect */
+.glass {
+  background: rgba(18, 24, 21, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Subtle glow */
+.glow {
+  box-shadow: 0 0 30px -5px rgba(74, 222, 128, 0.3);
+}
+
+/* Animations */
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out forwards;
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #4ade80 0%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+
+/* Mobile viewport */
+@supports (height: 100dvh) {
+  .min-h-screen { min-height: 100dvh; }
 }
