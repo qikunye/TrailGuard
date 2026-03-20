@@ -43,9 +43,9 @@ const features = [
 ];
 
 const stats = [
-  { value: "500+", label: "Trails" },
-  { value: "24/7", label: "Support" },
-
+  { value: "500+", label: "Trails Mapped" },
+  { value: "24/7", label: "Live Support" },
+  { value: "10k+", label: "Hikers" },
   { value: "SG", label: "Ready" },
 ];
 
@@ -69,15 +69,15 @@ export default function LandingPage() {
       </header>
 
       {/* Hero - Full viewport height */}
-      <section className="min-h-screen flex flex-col items-center justify-center text-center px-6 relative">
+      <section className="min-h-screen flex flex-col items-center justify-center text-center px-6 relative" style={{ contain: "paint" }}>
 
         {/* Background gradient accent */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-primary/10 rounded-full blur-[120px]" />
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-primary/10 rounded-full blur-[120px]" style={{ willChange: "transform", transform: "translateZ(0)" }} />
         </div>
 
         {/* Trail animation */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none select-none" style={{ opacity: 0.4 }}>
+        <div className="absolute inset-0 overflow-hidden pointer-events-none select-none" style={{ opacity: 0.4, willChange: "transform", transform: "translateZ(0)" }}>
           <svg
             viewBox="0 0 1200 600"
             preserveAspectRatio="xMidYMid slice"
@@ -192,10 +192,9 @@ export default function LandingPage() {
           </h1>
 
           {/* Caption */}
-          <p className="text-xl md:text-2xl text-muted leading-relaxed mb-10 max-w-2xl mx-auto">
+          <p className="text-xl md:text-lg text-muted leading-relaxed mb-10 max-w-2xl mx-auto">
             Hike smarter. Come back safe.
             <br />
-            <span className="text-base md:text-lg">Real-time trail assessments, hazard alerts, and emergency tools for Singapore hikers.</span>
           </p>
 
           {/* CTA Buttons */}
@@ -226,18 +225,23 @@ export default function LandingPage() {
       </section>
 
       {/* Stats */}
-      <section className="py-16">
-        <div className="flex flex-row justify-center gap-8 px-6 md:gap-16 md:px-12">
+      <section className="py-14">
+        <div className="flex flex-row items-center justify-center px-6">
           {stats.map((s, i) => (
-            <div key={i} className="flex flex-col items-center text-center">
-              <div
-                className="text-3xl md:text-4xl font-bold text-fg leading-none mb-1"
-                style={{ textShadow: "0 0 20px rgba(74,222,128,0.7), 0 0 40px rgba(74,222,128,0.4)" }}
-              >
-                {s.value}
+            <>
+              <div key={i} className="flex flex-col items-center text-center px-6 md:px-10">
+                <div
+                  className="text-2xl md:text-4xl font-bold text-primary leading-none mb-1"
+                  style={{ textShadow: "0 0 24px rgba(74,222,128,0.5)" }}
+                >
+                  {s.value}
+                </div>
+                <div className="text-xs md:text-sm text-muted mt-1 tracking-wide uppercase">{s.label}</div>
               </div>
-              <div className="text-sm text-muted">{s.label}</div>
-            </div>
+              {i < stats.length - 1 && (
+                <div key={`divider-${i}`} className="w-px h-10 bg-white/10 shrink-0" />
+              )}
+            </>
           ))}
         </div>
       </section>
@@ -249,17 +253,17 @@ export default function LandingPage() {
           <p className="text-lg text-muted">Designed for Singapore hikers</p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
           {features.map((f, i) => (
             <div
               key={i}
-              className="group relative bg-white/[0.03] border border-white/5 rounded-2xl p-6 hover:bg-white/[0.05] hover:border-white/10 transition-all"
+              className="group relative bg-white/[0.03] border border-white/5 rounded-2xl p-4 md:p-6 hover:bg-white/[0.05] hover:border-white/10 transition-colors"
             >
-              <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary mb-5 group-hover:bg-primary/20 transition-all">
+              <div className="w-8 h-8 md:w-12 md:h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary mb-3 md:mb-5 group-hover:bg-primary/20 transition-all [&>svg]:w-4 [&>svg]:h-4 md:[&>svg]:w-6 md:[&>svg]:h-6">
                 {f.icon}
               </div>
-              <h3 className="font-semibold text-fg text-lg mb-2">{f.title}</h3>
-              <p className="text-sm text-muted leading-relaxed">{f.desc}</p>
+              <h3 className="font-semibold text-fg text-xs md:text-lg mb-1 md:mb-2">{f.title}</h3>
+              <p className="text-xs md:text-sm text-muted leading-relaxed">{f.desc}</p>
             </div>
           ))}
         </div>
@@ -282,7 +286,7 @@ export default function LandingPage() {
               </button>
             </Link>
           </div>
-          <div className="absolute -right-20 -top-20 w-60 h-60 bg-primary/10 rounded-full blur-3xl" />
+          <div className="absolute -right-20 -top-20 w-60 h-60 bg-primary/10 rounded-full blur-3xl" style={{ willChange: "transform", transform: "translateZ(0)" }} />
         </div>
       </section>
 
