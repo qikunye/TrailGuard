@@ -16,10 +16,11 @@ export default function IncidentReportForm({ onSubmit, loading, severity, photoU
   const [injuryType,   setInjuryType]   = useState("");
   const [locationDesc, setLocationDesc] = useState("");
   const [description,  setDescription]  = useState("");
+  const [hikerPhone,   setHikerPhone]   = useState("");
 
   function handleSubmit(e) {
     e.preventDefault();
-    onSubmit?.({ trailId: trailId || "unknown", severity, injuryType, description, location: { description: locationDesc }, photoUrl });
+    onSubmit?.({ trailId: trailId || "unknown", severity, injuryType, description, location: { description: locationDesc }, photoUrl, hikerPhone });
   }
 
   return (
@@ -75,9 +76,27 @@ export default function IncidentReportForm({ onSubmit, loading, severity, photoU
         />
       </div>
 
+      <div className="mb-4">
+        <label className={lbl}>Your Phone Number (for SMS confirmation)</label>
+        <div className={wrap}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={icon}>
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+          </svg>
+          <input
+            type="tel"
+            placeholder="+6583355100"
+            value={hikerPhone}
+            onChange={e => setHikerPhone(e.target.value)}
+            required
+            className={input}
+          />
+        </div>
+        <p className="text-[0.75rem] text-muted mt-1 ml-1">Enter in E.164 format, e.g. +6583355100</p>
+      </div>
+
       <button
         type="submit"
-        disabled={loading || !injuryType || !severity}
+        disabled={loading || !injuryType || !severity || !hikerPhone}
         className="w-full py-3 px-4 bg-primary text-bg rounded-full text-[0.95rem] font-bold cursor-pointer flex items-center justify-center gap-2 transition-all hover:opacity-90 hover:-translate-y-px disabled:opacity-45 disabled:cursor-not-allowed border-none"
       >
         {loading ? "Sending Alert..." : "Send Emergency Alert"}

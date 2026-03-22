@@ -1,19 +1,26 @@
-import { useState } from "react";
+import { useState, useContext } from "react";
 import Navbar from "../components/shared/Navbar.jsx";
 import SeveritySelector from "../components/emergency/SeveritySelector.jsx";
 import IncidentReportForm from "../components/emergency/IncidentReportForm.jsx";
 import PhotoUpload from "../components/emergency/PhotoUpload.jsx";
 import { useEmergency } from "../hooks/useEmergency.js";
 import { useNavigate } from "react-router-dom";
+import { AuthContext } from "../context/AuthContext.jsx";
 
 export default function EmergencyReportPage() {
   const { submitReport, loading } = useEmergency();
+  const { currentUser } = useContext(AuthContext);
   const navigate = useNavigate();
   const [severity, setSeverity] = useState(null);
   const [photoUrl, setPhotoUrl] = useState(null);
 
   async function handleSubmit(data) {
-    const result = await submitReport({ ...data, severity, photoUrl });
+    const result = await submitReport({
+      ...data,
+      severity,
+      photoUrl,
+      hikerId: currentUser?.uid ?? "usr_001",
+    });
     if (result) navigate("/emergency/confirm");
   }
 
