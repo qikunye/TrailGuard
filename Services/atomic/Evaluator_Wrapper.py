@@ -3,7 +3,7 @@ TRAILGUARD – Evaluator Wrapper  (LLM Wrapper)
 Port: 8006
 
 Accepts a consolidated payload from the Orchestrator, builds a structured
-prompt, calls the Google Gemini API, and normalises the response into:
+prompt, calls the OpenAI API, and normalises the response into:
 
 {
   finalDecision:  "GO" | "CAUTION" | "DO_NOT_GO"
@@ -27,15 +27,12 @@ from pydantic import BaseModel
 log = logging.getLogger("EvaluatorWrapper")
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="TRAILGUARD – Evaluator Wrapper (Gemini)", version="1.0.0")
+app = FastAPI(title="TRAILGUARD – Evaluator Wrapper (OpenAI)", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-GEMINI_URL     = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_URL     = "https://api.openai.com/v1/chat/completions"
 TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 
 # ── Request schema ────────────────────────────────────────────────────────────
@@ -114,24 +111,22 @@ The JSON must follow this exact structure:
 Rules for finalDecision:
 - GO: Conditions are safe, hiker is capable, no significant risks.
 - CAUTION: Some risk factors present; hiker may proceed with precautions.
-- DO_NOT_GO: Serious risks (closed trail, extreme weather, critical risk score, 
+- DO_NOT_GO: Serious risks (closed trail, extreme weather, critical risk score,
               hiker experience well below trail difficulty, return after dark).
 """.strip()
 
 # ── Normalisation ──────────────────────────────────────────────────────────────
 
 def _extract_json(text: str) -> dict:
-    """Extract JSON from Gemini response, stripping any markdown fences."""
-    # Remove ```json ... ``` wrappers if present
+    """Extract JSON from OpenAI response, stripping any markdown fences."""
     clean = re.sub(r"```(?:json)?", "", text).replace("```", "").strip()
     try:
         return json.loads(clean)
     except json.JSONDecodeError:
-        # Try to locate JSON object via regex as fallback
         match = re.search(r"\{.*\}", clean, re.DOTALL)
         if match:
             return json.loads(match.group())
-        raise ValueError(f"Could not parse JSON from Gemini response: {text[:300]}")
+        raise ValueError(f"Could not parse JSON from OpenAI response: {text[:300]}")
 
 
 def _normalise(raw: dict) -> dict:
@@ -152,51 +147,58 @@ def _normalise(raw: dict) -> dict:
 
 @app.post("/evaluate", tags=["Evaluation"])
 async def evaluate(req: EvaluationRequest):
-    if not GEMINI_API_KEY:
+    if not OPENAI_API_KEY:
         raise HTTPException(
             status_code=503,
-            detail="GEMINI_API_KEY is not configured. Set the environment variable."
+            detail="OPENAI_API_KEY is not configured. Set the environment variable."
         )
 
     prompt = _build_prompt(req)
-    log.info("Sending evaluation request to Gemini model=%s", GEMINI_MODEL)
+    log.info("Sending evaluation request to OpenAI model=%s", OPENAI_MODEL)
 
-    gemini_body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature":     0.2,    # low temp for deterministic safety decisions
-            "maxOutputTokens": 512,
-            "topP":            0.8,
-        },
+    openai_body = {
+        "model": OPENAI_MODEL,
+        "messages": [
+            {"role": "system", "content": "You are a trail safety evaluator. Always respond with valid JSON only."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 512,
+        "top_p": 0.8,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
     }
 
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.post(GEMINI_URL, json=gemini_body, timeout=TIMEOUT)
+            resp = await client.post(OPENAI_URL, json=openai_body, headers=headers, timeout=TIMEOUT)
             resp.raise_for_status()
-            gemini_data = resp.json()
+            openai_data = resp.json()
         except httpx.HTTPStatusError as e:
-            log.error("Gemini API HTTP error: %s – %s", e.response.status_code, e.response.text)
-            raise HTTPException(status_code=502, detail=f"Gemini API error: {e.response.status_code}")
+            log.error("OpenAI API HTTP error: %s – %s", e.response.status_code, e.response.text)
+            raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.response.status_code}")
         except httpx.RequestError as e:
-            log.error("Gemini API connection error: %s", e)
-            raise HTTPException(status_code=503, detail="Cannot reach Gemini API.")
+            log.error("OpenAI API connection error: %s", e)
+            raise HTTPException(status_code=503, detail="Cannot reach OpenAI API.")
 
-    # Extract text from Gemini response
+    # Extract text from OpenAI response
     try:
-        raw_text = gemini_data["candidates"][0]["content"]["parts"][0]["text"]
+        raw_text = openai_data["choices"][0]["message"]["content"]
     except (KeyError, IndexError) as e:
-        log.error("Unexpected Gemini response structure: %s", gemini_data)
-        raise HTTPException(status_code=502, detail=f"Unexpected Gemini response structure: {e}")
+        log.error("Unexpected OpenAI response structure: %s", openai_data)
+        raise HTTPException(status_code=502, detail=f"Unexpected OpenAI response structure: {e}")
 
-    log.info("Gemini raw response: %s", raw_text[:200])
+    log.info("OpenAI raw response: %s", raw_text[:200])
 
     try:
         parsed  = _extract_json(raw_text)
         result  = _normalise(parsed)
     except (ValueError, KeyError) as e:
-        log.error("Failed to parse Gemini response: %s", e)
-        raise HTTPException(status_code=502, detail=f"Failed to parse Gemini response: {e}")
+        log.error("Failed to parse OpenAI response: %s", e)
+        raise HTTPException(status_code=502, detail=f"Failed to parse OpenAI response: {e}")
 
     log.info("Evaluation complete: finalDecision=%s confidence=%.2f",
              result["finalDecision"], result["confidenceScore"])
@@ -205,12 +207,12 @@ async def evaluate(req: EvaluationRequest):
 
 @app.get("/health", tags=["Ops"])
 async def health():
-    gemini_configured = bool(GEMINI_API_KEY)
+    openai_configured = bool(OPENAI_API_KEY)
     return {
         "status": "ok",
         "service": "Evaluator_Wrapper",
-        "geminiConfigured": gemini_configured,
-        "model": GEMINI_MODEL,
+        "openaiConfigured": openai_configured,
+        "model": OPENAI_MODEL,
     }
 
 
