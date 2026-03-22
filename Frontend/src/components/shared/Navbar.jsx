@@ -9,10 +9,10 @@ const Logo = () => (
 );
 
 const navLinks = [
+  { to: "/register-trail",   label: "Register Hike" },
   { to: "/trail-assessment", label: "Trail Check" },
   { to: "/emergency",        label: "Emergency" },
   { to: "/hazard",           label: "Hazard" },
-  { to: "/register-trail",   label: "Register Hike" },
   { to: "/profile",          label: "My Profile" },
 ];
 
