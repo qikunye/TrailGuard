@@ -1,0 +1,146 @@
+services:
+
+  # ─── Frontend ───────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    env_file:
+      - ./Frontend/.env
+    depends_on:
+      - orchestrator
+    networks:
+      - trailguard
+
+  # ─── Orchestrator ───────────────────────────────────────────
+  orchestrator:
+    build:
+      context: ./Services
+      dockerfile: orchestrator/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./Services/.env
+    depends_on:
+      - hiker-profile
+      - trail-condition
+      - incident-risk
+      - hike-completion
+      - weather-wrapper
+      - evaluator-wrapper
+      - googlemaps-wrapper
+    networks:
+      - trailguard
+
+  # ─── Atomic Services ────────────────────────────────────────
+  hiker-profile:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Hiker_Profile_Service
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+
+  trail-condition:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Trail_Condition_Service
+    ports:
+      - "8002:8002"
+    environment:
+      - PORT=8002
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+
+  incident-risk:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Incident_Risk_Service
+    ports:
+      - "8003:8003"
+    environment:
+      - PORT=8003
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+
+  hike-completion:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Hike_Completion_Service
+    ports:
+      - "8004:8004"
+    environment:
+      - PORT=8004
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+
+  # ─── Wrappers ────────────────────────────────────────────────
+  weather-wrapper:
+    build:
+      context: ./Services
+      dockerfile: wrappers/Dockerfile
+      args:
+        SERVICE: Weather_Wrapper
+    ports:
+      - "8005:8005"
+    environment:
+      - PORT=8005
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+
+  evaluator-wrapper:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Evaluator_Wrapper
+    ports:
+      - "8006:8006"
+    environment:
+      - PORT=8006
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+
+  googlemaps-wrapper:
+    build:
+      context: ./Services
+      dockerfile: wrappers/Dockerfile
+      args:
+        SERVICE: GoogleMaps_Wrapper
+    ports:
+      - "8007:8007"
+    environment:
+      - PORT=8007
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+
+networks:
+  trailguard:
+    driver: bridge
