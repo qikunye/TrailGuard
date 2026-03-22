@@ -2,8 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 
-const WRAPPER = import.meta.env.VITE_MAPS_WRAPPER_URL || "http://localhost:8007";
-const OSRM    = "https://router.project-osrm.org/route/v1/foot";
+const WRAPPER = import.meta.env.VITE_MAPS_WRAPPER_URL || "/api";
 const SG      = [1.3521, 103.8198];
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -46,7 +45,7 @@ function LocationInput({ placeholder, color, onSelect, defaultValue }) {
         onSelect({ name, lat: data.lat, lng: data.lng, formatted: defaultValue });
       })
       .catch(() => {});
-  }, [defaultValue]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [defaultValue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close on outside click
   useEffect(() => {
@@ -124,11 +123,11 @@ function LocationInput({ placeholder, color, onSelect, defaultValue }) {
 
 // ── Main component ────────────────────────────────────────────────────────
 export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange, initialStart, initialEnd }) {
-  const [start,     setStart]     = useState(null);   // { name, lat, lng }
-  const [end,       setEnd]       = useState(null);
-  const [route,     setRoute]     = useState(null);   // [[lat,lng], ...]
-  const [routeInfo, setRouteInfo] = useState(null);
-  const [status,    setStatus]    = useState("idle");
+  const [start,      setStart]      = useState(null);
+  const [end,        setEnd]        = useState(null);
+  const [route,      setRoute]      = useState(null);
+  const [routeInfo,  setRouteInfo]  = useState(null);
+  const [status,     setStatus]     = useState("idle");
   const [currentPos, setCurrentPos] = useState(null);
 
   // Get current location once
@@ -140,7 +139,7 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
     );
   }, []);
 
-  // Fetch walking route from Google Maps Directions API
+  // Fetch walking route from Google Maps Directions via wrapper
   useEffect(() => {
     if (!start || !end) return;
     setStatus("loading");
@@ -148,55 +147,24 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
 
     (async () => {
       try {
-        // Try Google Maps Directions API first
-        let info = null;
-        try {
-          const res  = await fetch(
-            `${WRAPPER}/directions?origin_lat=${start.lat}&origin_lng=${start.lng}&dest_lat=${end.lat}&dest_lng=${end.lng}&mode=walking`
-          );
-          const data = await res.json();
-          if (res.ok && data.path?.length) {
-            info = {
-              startName:       start.name,
-              endName:         end.name,
-              distanceText:    data.distanceText,
-              durationText:    data.durationText,
-              distanceMetres:  data.distanceMetres,
-              durationSeconds: data.durationSeconds,
-              startLat: start.lat, startLng: start.lng,
-              endLat:   end.lat,   endLng:   end.lng,
-              path:     data.path,
-            };
-          }
-        } catch { /* fall through to OSRM */ }
+        const res  = await fetch(
+          `${WRAPPER}/directions?origin_lat=${start.lat}&origin_lng=${start.lng}&dest_lat=${end.lat}&dest_lng=${end.lng}&mode=walking`
+        );
+        const data = await res.json();
+        if (!res.ok || !data.path?.length) { setStatus("error"); return; }
 
-        // Fall back to OSRM if Google Maps failed
-        if (!info) {
-          const osrmRes = await fetch(
-            `${OSRM}/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`
-          );
-          const osrmData = await osrmRes.json();
-          if (osrmData.code !== "Ok" || !osrmData.routes?.length) { setStatus("error"); return; }
-          const r    = osrmData.routes[0];
-          const path = r.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
-          const hikingSeconds = Math.round((r.distance / 4000) * 3600);
-          const fmt = (s) => s >= 3600
-            ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
-            : `${Math.floor(s / 60)} min`;
-          info = {
-            startName:       start.name,
-            endName:         end.name,
-            distanceText:    r.distance >= 1000 ? `${(r.distance / 1000).toFixed(1)} km` : `${Math.round(r.distance)} m`,
-            durationText:    fmt(hikingSeconds),
-            distanceMetres:  Math.round(r.distance),
-            durationSeconds: hikingSeconds,
-            startLat: start.lat, startLng: start.lng,
-            endLat:   end.lat,   endLng:   end.lng,
-            path,
-          };
-        }
-
-        setRoute(info.path);
+        const info = {
+          startName:       start.name,
+          endName:         end.name,
+          distanceText:    data.distanceText,
+          durationText:    data.durationText,
+          distanceMetres:  data.distanceMetres,
+          durationSeconds: data.durationSeconds,
+          startLat: start.lat, startLng: start.lng,
+          endLat:   end.lat,   endLng:   end.lng,
+          path:     data.path,
+        };
+        setRoute(data.path);
         setRouteInfo(info);
         setStatus("ok");
         onRouteReady?.(info);
@@ -289,7 +257,7 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
         <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> You</span>
         <span className="ml-auto flex items-center gap-1 opacity-60">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/></svg>
-          Route via OpenStreetMap
+          Route via Google Maps
         </span>
       </div>
     </div>
