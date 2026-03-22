@@ -5,14 +5,15 @@ import IncidentRiskPanel from "../components/assessment/IncidentRiskPanel.jsx";
 import CompletionFeasibility from "../components/assessment/CompletionFeasibility.jsx";
 import AlertBanner from "../components/shared/AlertBanner.jsx";
 import { useAssessment } from "../hooks/useAssessment.js";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useContext } from "react";
 import { TrailContext } from "../context/TrailContext.jsx";
 
 export default function TrailAssessmentPage() {
   const { assess, loading, error } = useAssessment();
   const { setAssessmentResult } = useContext(TrailContext);
-  const navigate = useNavigate();
+  const navigate  = useNavigate();
+  const { state } = useLocation();
 
   async function handleSearch(trailData) {
     const result = await assess(trailData);
@@ -29,7 +30,7 @@ export default function TrailAssessmentPage() {
         <h1 className="text-[1.4rem] font-bold text-fg mb-1">Trail Assessment</h1>
         <p className="text-sm text-muted mb-6">Check conditions before you head out</p>
         {error && <AlertBanner type="error" message={error} />}
-        <TrailSearchForm onSearch={handleSearch} loading={loading} />
+        <TrailSearchForm onSearch={handleSearch} loading={loading} initialValues={state} />
         <WeatherWidget />
         <IncidentRiskPanel />
         <CompletionFeasibility />

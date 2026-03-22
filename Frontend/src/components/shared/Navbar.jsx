@@ -9,11 +9,10 @@ const Logo = () => (
 );
 
 const navLinks = [
-  { to: "/trail-assessment", label: "Trail Check" },
-  { to: "/emergency",        label: "Emergency" },
-  { to: "/hazard",           label: "Hazard" },
-  { to: "/register-trail",   label: "Register Hike" },
-  { to: "/profile",          label: "My Profile" },
+  { to: "/register-trail", label: "Register Hike" },
+  { to: "/track-hike",     label: "Track Hike" },
+  { to: "/emergency",      label: "Emergency" },
+  { to: "/hazard",         label: "Hazard" },
 ];
 
 const HEADER_H = 57; // mobile header height in px
