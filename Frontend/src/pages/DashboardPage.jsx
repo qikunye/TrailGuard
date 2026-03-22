@@ -1,6 +1,6 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import Navbar from "../components/shared/Navbar.jsx";
-import TrailMap, { matchTrail } from "../components/map/TrailMap.jsx";
+import UpcomingHikeMap from "../components/map/UpcomingHikeMap.jsx";
 import { useAuth } from "../hooks/useAuth.js";
 
 const quickActions = [
@@ -38,13 +38,12 @@ function formatDate(dateStr, timeStr) {
 
 export default function DashboardPage() {
   const { currentUser } = useAuth();
+  const navigate = useNavigate();
   const firstName = currentUser?.displayName?.split(" ")[0];
 
   const upcomingHike = (() => {
     try { return JSON.parse(localStorage.getItem("upcomingHike")); } catch { return null; }
   })();
-
-  const trailInfo = upcomingHike ? matchTrail(upcomingHike.trailName) : null;
 
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Up late" : hour < 12 ? "Morning" : hour < 18 ? "Afternoon" : "Evening";
@@ -68,14 +67,14 @@ export default function DashboardPage() {
 
         {/* ── MAP SECTION ── */}
         <div className="relative rounded-2xl overflow-hidden bg-white/[0.03] border border-white/5 mb-4" style={{ height: 280 }}>
-          <TrailMap trailName={upcomingHike?.trailName} className="rounded-2xl" />
+          <UpcomingHikeMap hike={upcomingHike} height={280} />
 
-          {/* Overlay pill – trail name + status */}
+          {/* Overlay pill – route label */}
           <div className="absolute top-3 left-3 z-[400] flex items-center gap-2 bg-black/70 backdrop-blur px-3 py-1.5 rounded-full">
             <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
             <span className="text-xs font-medium text-fg">
-              {upcomingHike
-                ? (trailInfo?.name ?? upcomingHike.trailName)
+              {upcomingHike?.startLocation && upcomingHike?.endLocation
+                ? `${upcomingHike.startLocation} → ${upcomingHike.endLocation}`
                 : "Singapore Trails"}
             </span>
           </div>
@@ -98,19 +97,17 @@ export default function DashboardPage() {
           <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-4 mb-6 flex items-center justify-between gap-4">
             <div className="min-w-0">
               <p className="text-xs text-muted mb-0.5">Upcoming hike</p>
-              <p className="font-semibold text-fg truncate">{upcomingHike.trailName}</p>
+              <p className="font-semibold text-fg truncate">
+                {upcomingHike.startLocation} → {upcomingHike.endLocation}
+              </p>
               <p className="text-xs text-muted mt-0.5">
                 {formatDate(upcomingHike.startDate, upcomingHike.startTime)}
                 {upcomingHike.estimatedDuration && ` · ${upcomingHike.estimatedDuration}h`}
                 {upcomingHike.partySize > 1 && ` · ${upcomingHike.partySize} people`}
+                {upcomingHike.distanceText && ` · ${upcomingHike.distanceText}`}
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {trailInfo && (
-                <span className="hidden sm:block text-xs text-muted bg-white/5 border border-white/5 px-3 py-1 rounded-full">
-                  {trailInfo.difficulty} · {trailInfo.distance}
-                </span>
-              )}
               <button
                 onClick={() => { localStorage.removeItem("upcomingHike"); window.location.reload(); }}
                 className="text-muted hover:text-red transition-colors bg-transparent border-none cursor-pointer p-1"
@@ -139,6 +136,102 @@ export default function DashboardPage() {
               </div>
             </Link>
           ))}
+        </div>
+
+        {/* ── RECOMMENDED TRAILS ── */}
+        <div className="mt-8">
+          <p className="text-xs text-muted uppercase tracking-widest mb-3">Recommended Trails</p>
+          <div className="flex flex-col gap-3">
+            {[
+              {
+                name: "MacRitchie Reservoir Loop",
+                start: "MacRitchie Reservoir Park, Singapore",
+                end: "HSBC TreeTop Walk, Singapore",
+                distance: "11 km", duration: "3–4 h",
+                difficulty: "Moderate", diffColor: "text-amber", diffBg: "bg-amber/10",
+                tags: ["Forest", "Boardwalk"],
+                desc: "Scenic loop around the reservoir with a treetop walk viewpoint.",
+              },
+              {
+                name: "Bukit Timah Summit",
+                start: "Bukit Timah Nature Reserve Visitor Centre, Singapore",
+                end: "Bukit Timah Hill Summit, Singapore",
+                distance: "6 km", duration: "2–3 h",
+                difficulty: "Moderate", diffColor: "text-amber", diffBg: "bg-amber/10",
+                tags: ["Hill", "Nature Reserve"],
+                desc: "Singapore's highest natural point at 163m, dense primary rainforest.",
+              },
+              {
+                name: "Southern Ridges",
+                start: "HarbourFront MRT Station, Singapore",
+                end: "Labrador Nature Reserve, Singapore",
+                distance: "9 km", duration: "3 h",
+                difficulty: "Easy", diffColor: "text-primary", diffBg: "bg-primary/10",
+                tags: ["Skyline", "Park Connector"],
+                desc: "Connected ridge parks from HarbourFront to Labrador with city views.",
+              },
+              {
+                name: "Sungei Buloh Wetland Reserve",
+                start: "Sungei Buloh Wetland Reserve, Singapore",
+                end: "Kranji Marshes, Singapore",
+                distance: "7 km", duration: "2–3 h",
+                difficulty: "Easy", diffColor: "text-primary", diffBg: "bg-primary/10",
+                tags: ["Wetlands", "Wildlife"],
+                desc: "Mangrove boardwalks with resident monitor lizards and migratory birds.",
+              },
+              {
+                name: "Pulau Ubin Chek Jawa",
+                start: "Pulau Ubin Jetty, Singapore",
+                end: "Chek Jawa Wetlands, Singapore",
+                distance: "5 km", duration: "2 h",
+                difficulty: "Easy", diffColor: "text-primary", diffBg: "bg-primary/10",
+                tags: ["Island", "Coastal"],
+                desc: "Coastal wetland boardwalk on Singapore's rustic island getaway.",
+              },
+            ].map((trail) => (
+              <div
+                key={trail.name}
+                onClick={() => navigate("/register-trail", { state: { start: trail.start, end: trail.end, name: trail.name } })}
+                className="flex items-start gap-4 bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-4 hover:bg-white/[0.05] hover:border-primary/20 transition-all cursor-pointer group"
+              >
+                {/* Icon */}
+                <div className="w-10 h-10 rounded-xl bg-primary/10 group-hover:bg-primary/20 flex items-center justify-center shrink-0 mt-0.5 transition-colors">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 20l5-9 4 6 3-4 6 7"/><circle cx="17" cy="6" r="2"/>
+                  </svg>
+                </div>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0 overflow-hidden">
+                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                    <p className="text-sm font-semibold text-fg">{trail.name}</p>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${trail.diffBg} ${trail.diffColor}`}>
+                      {trail.difficulty}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted mb-2">{trail.desc}</p>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-xs text-muted flex items-center gap-1">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg>
+                      {trail.distance}
+                    </span>
+                    <span className="text-xs text-muted flex items-center gap-1">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                      {trail.duration}
+                    </span>
+                    {trail.tags.map((t) => (
+                      <span key={t} className="text-[10px] text-muted bg-white/5 border border-white/5 px-2 py-0.5 rounded-full">{t}</span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Arrow */}
+                <svg className="text-muted group-hover:text-primary transition-colors shrink-0 mt-1" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 18l6-6-6-6"/>
+                </svg>
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* ── STATUS ROW ── */}
