@@ -6,10 +6,10 @@ const wrap     = "flex items-center bg-surface border border-line rounded-full p
 const input    = "flex-1 bg-transparent border-none outline-none text-fg text-[0.92rem] py-3 font-[inherit] placeholder:text-muted min-w-0";
 const iconCls  = "text-muted shrink-0";
 
-export default function TrailSearchForm({ onSearch, loading }) {
-  const [trailName, setTrailName] = useState("");
-  const [date, setDate]           = useState(new Date().toISOString().split("T")[0]);
-  const [partySize, setPartySize] = useState(1);
+export default function TrailSearchForm({ onSearch, loading, initialValues }) {
+  const [trailName, setTrailName] = useState(initialValues?.trailName || "");
+  const [date, setDate]           = useState(initialValues?.date || new Date().toISOString().split("T")[0]);
+  const [partySize, setPartySize] = useState(initialValues?.partySize || 1);
 
   function handleSubmit(e) {
     e.preventDefault();

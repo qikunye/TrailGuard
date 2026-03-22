@@ -12,6 +12,7 @@ import HazardReportPage      from "../pages/HazardReportPage.jsx";
 import AlternativeRoutePage  from "../pages/AlternativeRoutePage.jsx";
 import ProfilePage           from "../pages/ProfilePage.jsx";
 import TrailRegistrationPage from "../pages/TrailRegistrationPage.jsx";
+import TrackHikePage         from "../pages/TrackHikePage.jsx";
 
 export default function AppRouter() {
   return (
@@ -32,6 +33,7 @@ export default function AppRouter() {
           <Route path="/hazard/alternative"       element={<AlternativeRoutePage />} />
           <Route path="/profile"                  element={<ProfilePage />} />
           <Route path="/register-trail"           element={<TrailRegistrationPage />} />
+          <Route path="/track-hike"               element={<TrackHikePage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

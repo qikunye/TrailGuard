@@ -430,6 +430,46 @@ async def nearby_emergency(
     }
 
 
+WEATHER_URL = "https://weather.googleapis.com/v1/forecast/hours:lookup"
+
+
+@app.get("/weather", tags=["Weather"])
+async def weather(
+    lat:   float = Query(..., description="Latitude of the location"),
+    lng:   float = Query(..., description="Longitude of the location"),
+    hours: int   = Query(24,  description="Number of forecast hours (max 240)"),
+):
+    """
+    Get hourly weather forecast from the Google Weather API.
+    Used by the frontend to show weather at the hike location and time.
+
+    Returns:
+        forecastHours list with temperature, condition, precipitation, wind, humidity.
+    """
+    _check_key()
+
+    params = {
+        "key":                GOOGLE_MAPS_API_KEY,
+        "location.latitude":  lat,
+        "location.longitude": lng,
+        "hours":              min(hours, 240),
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(WEATHER_URL, params=params, timeout=TIMEOUT)
+            resp.raise_for_status()
+        except httpx.RequestError as e:
+            log.error("Weather request failed: %s", e)
+            raise HTTPException(status_code=503, detail="Google Weather API unreachable.")
+
+    data = resp.json()
+    if "error" in data:
+        raise HTTPException(status_code=502, detail=data["error"].get("message", "Weather API error"))
+
+    return data
+
+
 @app.get("/health", tags=["Ops"])
 async def health():
     return {

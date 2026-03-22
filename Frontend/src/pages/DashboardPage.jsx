@@ -1,7 +1,177 @@
 import { Link, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 import Navbar from "../components/shared/Navbar.jsx";
 import UpcomingHikeMap from "../components/map/UpcomingHikeMap.jsx";
 import { useAuth } from "../hooks/useAuth.js";
+
+// ── WMO code → icon + label (Open-Meteo fallback) ────────────────────────
+function wmoInfo(code) {
+  if (code === 0)              return { icon: "☀️",  label: "Clear Sky" };
+  if (code <= 2)               return { icon: "⛅",  label: "Partly Cloudy" };
+  if (code === 3)              return { icon: "☁️",  label: "Overcast" };
+  if (code <= 48)              return { icon: "🌫",  label: "Foggy" };
+  if (code <= 55)              return { icon: "🌦",  label: "Drizzle" };
+  if (code <= 65)              return { icon: "🌧",  label: "Rain" };
+  if (code <= 77)              return { icon: "❄️",  label: "Snow" };
+  if (code <= 82)              return { icon: "🌦",  label: "Rain Showers" };
+  if (code === 95)             return { icon: "⛈",  label: "Thunderstorm" };
+  if (code >= 96)              return { icon: "⛈",  label: "Thunderstorm + Hail" };
+  return { icon: "🌤", label: "Unknown" };
+}
+
+// ── Google Weather type → icon + label ───────────────────────────────────
+function googleConditionInfo(type = "") {
+  const t = type.toUpperCase();
+  if (t.includes("THUNDER"))                               return { icon: "⛈",  label: "Thunderstorm" };
+  if (t.includes("HEAVY_RAIN") || t.includes("SHOWERS"))  return { icon: "🌧",  label: "Heavy Rain" };
+  if (t.includes("RAIN") || t.includes("DRIZZLE"))        return { icon: "🌦",  label: "Rain" };
+  if (t.includes("FOG") || t.includes("MIST"))            return { icon: "🌫",  label: "Foggy" };
+  if (t.includes("OVERCAST"))                             return { icon: "☁️",  label: "Overcast" };
+  if (t.includes("CLOUDY"))                               return { icon: "☁️",  label: "Cloudy" };
+  if (t.includes("PARTLY") || t.includes("MOSTLY_CLEAR")) return { icon: "⛅",  label: "Partly Cloudy" };
+  if (t.includes("CLEAR") || t.includes("SUNNY"))         return { icon: "☀️",  label: "Clear" };
+  return { icon: "🌤", label: type.replace(/_/g, " ") };
+}
+
+const GMAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+async function resolveCoords(hike) {
+  if (hike.startLat && hike.startLng) return { lat: hike.startLat, lng: hike.startLng };
+  if (!hike.startLocation) return null;
+  try {
+    const r = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(hike.startLocation)}&region=SG&key=${GMAPS_KEY}`
+    );
+    const d = await r.json();
+    const loc = d.results?.[0]?.geometry?.location;
+    return loc ? { lat: loc.lat, lng: loc.lng } : null;
+  } catch { return null; }
+}
+
+// ── Weather widget ─────────────────────────────────────────────────────────
+function HikeWeatherWidget({ hike }) {
+  const [data,   setData]   = useState(null);  // { temp, feels, rain, humid, wind, icon, label, source }
+  const [status, setStatus] = useState("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const coords = await resolveCoords(hike);
+      if (!coords) { if (!cancelled) setStatus("error"); return; }
+
+      const hikeTime   = new Date(`${hike.startDate}T${hike.startTime}`);
+      const now        = new Date();
+      const hoursUntil = Math.ceil((hikeTime - now) / 3_600_000);
+
+      if (hoursUntil > 240) { if (!cancelled) setStatus("far"); return; }
+      const hours = Math.max(hoursUntil + 3, 3);
+
+      // ① Try Google Weather API (via Vercel serverless function)
+      try {
+        const res  = await fetch(`/api/weather?lat=${coords.lat}&lng=${coords.lng}&hours=${hours}`);
+        const json = await res.json();
+        const forecasts = json.forecastHours || [];
+        let closest = null, minDiff = Infinity;
+        for (const f of forecasts) {
+          const diff = Math.abs(new Date(f.interval?.startTime) - hikeTime);
+          if (diff < minDiff) { minDiff = diff; closest = f; }
+        }
+        if (closest && !cancelled) {
+          const cond = googleConditionInfo(closest.weatherCondition?.type || "");
+          setData({
+            temp:   closest.temperature?.degrees,
+            feels:  closest.feelsLikeTemperature?.degrees,
+            rain:   closest.precipitation?.probability?.percent,
+            humid:  closest.relativeHumidity,
+            wind:   closest.wind?.speed?.value,
+            windU:  "km/h",
+            icon:   cond.icon,
+            label:  closest.weatherCondition?.description?.text || cond.label,
+            source: "Google Weather",
+          });
+          setStatus("ok");
+          return;
+        }
+      } catch { /* fall through */ }
+
+      // ② Fallback: Open-Meteo (free, no key, always works)
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lng}&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation_probability,weather_code,wind_speed_10m&timezone=auto&forecast_days=10`;
+        const res  = await fetch(url);
+        const json = await res.json();
+        const times = json.hourly?.time || [];
+        let idx = 0, minDiff = Infinity;
+        times.forEach((t, i) => {
+          const diff = Math.abs(new Date(t) - hikeTime);
+          if (diff < minDiff) { minDiff = diff; idx = i; }
+        });
+        const h = json.hourly;
+        const cond = wmoInfo(h.weather_code?.[idx]);
+        if (!cancelled) {
+          setData({
+            temp:   h.temperature_2m?.[idx],
+            feels:  h.apparent_temperature?.[idx],
+            rain:   h.precipitation_probability?.[idx],
+            humid:  h.relative_humidity_2m?.[idx],
+            wind:   h.wind_speed_10m?.[idx],
+            windU:  "km/h",
+            icon:   cond.icon,
+            label:  cond.label,
+            source: "Open-Meteo",
+          });
+          setStatus("ok");
+        }
+      } catch { if (!cancelled) setStatus("error"); }
+    })();
+    return () => { cancelled = true; };
+  }, [hike]);
+
+  if (status === "far") return (
+    <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-4 mb-6 text-xs text-muted text-center">
+      Weather forecast available within 10 days of your hike.
+    </div>
+  );
+  if (status === "error") return null;
+  if (status === "loading") return (
+    <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-4 mb-6 flex items-center gap-2 text-xs text-muted">
+      <div className="w-3 h-3 border border-muted border-t-transparent rounded-full animate-spin" />
+      Loading weather forecast…
+    </div>
+  );
+
+  return (
+    <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-4 mb-6">
+      <p className="text-xs text-muted uppercase tracking-widest mb-3">Weather at hike time</p>
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 shrink-0">
+          <span className="text-4xl leading-none">{data.icon}</span>
+          <div>
+            <p className="text-2xl font-bold text-fg leading-none">
+              {data.temp != null ? `${Math.round(data.temp)}°C` : "–"}
+            </p>
+            {data.feels != null && <p className="text-xs text-muted mt-0.5">Feels {Math.round(data.feels)}°C</p>}
+          </div>
+        </div>
+
+        <div className="w-px h-10 bg-white/10 shrink-0" />
+
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-fg mb-2">{data.label}</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {data.rain  != null && <span className="text-xs text-muted">💧 {data.rain}% rain</span>}
+            {data.humid != null && <span className="text-xs text-muted">💦 {data.humid}% humidity</span>}
+            {data.wind  != null && <span className="text-xs text-muted">💨 {Math.round(data.wind)} {data.windU}</span>}
+          </div>
+        </div>
+
+        <div className="shrink-0 text-right hidden sm:block">
+          <p className="text-xs text-muted truncate max-w-[140px]">{hike.startLocation}</p>
+          <p className="text-xs text-muted">{hike.startDate} · {hike.startTime}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const quickActions = [
   {
@@ -11,9 +181,9 @@ const quickActions = [
     color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20 hover:border-blue-400/50", glowColor: "#60a5fa",
   },
   {
-    to: "/trail-assessment",
-    label: "Trail Check",
-    icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>,
+    to: "/track-hike",
+    label: "Track Hike",
+    icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 20l5-9 4 6 3-4 6 7"/><circle cx="17" cy="6" r="2"/></svg>,
     color: "text-primary", bg: "bg-primary/10", border: "border-primary/20 hover:border-primary/50", glowColor: "#4ade80",
   },
   {
@@ -109,6 +279,17 @@ export default function DashboardPage() {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
+                onClick={() => navigate("/trail-assessment", { state: {
+                  trailName:  `${upcomingHike.startLocation} to ${upcomingHike.endLocation}`,
+                  date:       upcomingHike.startDate,
+                  partySize:  upcomingHike.partySize,
+                }})}
+                className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-full hover:bg-primary/20 transition-colors cursor-pointer border-solid"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                Check Trail
+              </button>
+              <button
                 onClick={() => { localStorage.removeItem("upcomingHike"); window.location.reload(); }}
                 className="text-muted hover:text-red transition-colors bg-transparent border-none cursor-pointer p-1"
                 title="Clear hike"
@@ -121,9 +302,12 @@ export default function DashboardPage() {
           <div className="mb-6" />
         )}
 
+        {/* ── WEATHER ── */}
+        {upcomingHike && <HikeWeatherWidget hike={upcomingHike} />}
+
         {/* ── QUICK ACTIONS ── */}
         <p className="text-xs text-muted uppercase tracking-widest mb-3">Quick actions</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-3">
           {quickActions.map((a) => (
             <Link key={a.to} to={a.to} className="no-underline group">
               <div className={`relative overflow-hidden flex items-center gap-3 bg-white/[0.03] border rounded-xl px-4 py-3.5 transition-all hover:bg-white/[0.06] active:scale-[0.97] ${a.border}`}>
