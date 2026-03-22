@@ -188,6 +188,125 @@ async def geocode(
     }
 
 
+AUTOCOMPLETE_URL = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+
+@app.get("/autocomplete", tags=["Location"])
+async def autocomplete(
+    input: str = Query(..., description="Search text"),
+):
+    """
+    Suggest place names as the user types.
+    Used by the frontend for start/end location inputs.
+    """
+    _check_key()
+
+    params = {
+        "input":      input,
+        "location":   "1.3521,103.8198",   # bias toward Singapore
+        "radius":     50000,
+        "components": "country:sg",
+        "key":        GOOGLE_MAPS_API_KEY,
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(AUTOCOMPLETE_URL, params=params, timeout=TIMEOUT)
+            resp.raise_for_status()
+        except httpx.RequestError as e:
+            log.error("Autocomplete request failed: %s", e)
+            raise HTTPException(status_code=503, detail="Google Maps API unreachable.")
+
+    data = resp.json()
+    if data.get("status") not in ("OK", "ZERO_RESULTS"):
+        raise HTTPException(status_code=502, detail=f"Autocomplete status: {data.get('status')}")
+
+    return {
+        "predictions": [
+            {
+                "description":   p["description"],
+                "placeId":       p["place_id"],
+                "mainText":      p["structured_formatting"]["main_text"],
+                "secondaryText": p["structured_formatting"].get("secondary_text", ""),
+            }
+            for p in data.get("predictions", [])
+        ]
+    }
+
+
+DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json"
+
+
+def _decode_polyline(encoded: str) -> list:
+    """Decode a Google Maps encoded polyline into [[lat, lng], ...] pairs."""
+    coords, index, lat, lng = [], 0, 0, 0
+    while index < len(encoded):
+        for is_lng in (False, True):
+            shift = result = 0
+            while True:
+                b = ord(encoded[index]) - 63
+                index += 1
+                result |= (b & 0x1F) << shift
+                shift += 5
+                if b < 0x20:
+                    break
+            delta = ~(result >> 1) if result & 1 else result >> 1
+            if is_lng:
+                lng += delta
+            else:
+                lat += delta
+        coords.append([lat / 1e5, lng / 1e5])
+    return coords
+
+
+@app.get("/directions", tags=["Routing"])
+async def directions(
+    origin_lat: float = Query(..., description="Origin latitude"),
+    origin_lng: float = Query(..., description="Origin longitude"),
+    dest_lat:   float = Query(..., description="Destination latitude"),
+    dest_lng:   float = Query(..., description="Destination longitude"),
+    mode:       str   = Query("walking", description="Travel mode: walking | driving | bicycling | transit"),
+):
+    """
+    Get a full walking route from Google Maps Directions API.
+    Returns distance, duration, and decoded path coordinates for map rendering.
+    """
+    _check_key()
+
+    params = {
+        "origin":      f"{origin_lat},{origin_lng}",
+        "destination": f"{dest_lat},{dest_lng}",
+        "mode":        mode,
+        "key":         GOOGLE_MAPS_API_KEY,
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(DIRECTIONS_URL, params=params, timeout=TIMEOUT)
+            resp.raise_for_status()
+        except httpx.RequestError as e:
+            log.error("Directions request failed: %s", e)
+            raise HTTPException(status_code=503, detail="Google Maps API unreachable.")
+
+    data = resp.json()
+    if data.get("status") not in ("OK", "ZERO_RESULTS"):
+        raise HTTPException(status_code=502, detail=f"Directions status: {data.get('status')}")
+    if not data.get("routes"):
+        raise HTTPException(status_code=404, detail="No route found.")
+
+    route = data["routes"][0]
+    leg   = route["legs"][0]
+
+    path = _decode_polyline(route["overview_polyline"]["points"])
+
+    return {
+        "distanceMetres":  leg["distance"]["value"],
+        "distanceText":    leg["distance"]["text"],
+        "durationSeconds": leg["duration"]["value"],
+        "durationText":    leg["duration"]["text"],
+        "path":            path,
+    }
+
+
 @app.get("/distance-matrix", tags=["Routing"])
 async def distance_matrix(
     origin_lat:  float = Query(..., description="Origin latitude"),
