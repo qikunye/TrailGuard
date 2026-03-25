@@ -1,0 +1,6 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY wrappers/notification_requirements.txt .
+RUN pip install --no-cache-dir -r notification_requirements.txt
+COPY wrappers/Notification_Wrapper.py .
+CMD ["python", "Notification_Wrapper.py"]

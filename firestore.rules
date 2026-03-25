@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /incidents/{incidentId} {
+      // Any authenticated user can read incidents
+      allow read: if request.auth != null;
+
+      // Any authenticated user can create an incident
+      allow create: if request.auth != null;
+
+      // Only the user who created the incident can update or delete it
+      // Note: userId is stored as a number; request.auth.uid is a string.
+      // Compare using string() to handle the type difference.
+      allow update, delete: if request.auth != null
+        && string(resource.data.userId) == request.auth.uid;
+    }
+  }
+}
