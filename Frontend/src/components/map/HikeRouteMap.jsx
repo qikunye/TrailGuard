@@ -17,32 +17,59 @@ const startIcon   = makeIcon("#4ade80");
 const endIcon     = makeIcon("#f87171");
 const currentIcon = makeIcon("#3b82f6");
 
-// ── FitBounds helper ──────────────────────────────────────────────────────
-function FitBounds({ positions }) {
+// ── Coordinate guard ──────────────────────────────────────────────────────
+const validCoord = (p) => p != null && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng));
+
+// ── Map view helper — fits to route when available, else to markers ────────
+function MapView({ start, end, route }) {
   const map = useMap();
   useEffect(() => {
-    if (positions?.length > 1) map.fitBounds(positions, { padding: [40, 40] });
-  }, [positions, map]);
+    if (route?.length > 1) {
+      map.fitBounds(route, { padding: [40, 40] });
+      return;
+    }
+    const pts = [
+      validCoord(start) ? [start.lat, start.lng] : null,
+      validCoord(end)   ? [end.lat,   end.lng]   : null,
+    ].filter(Boolean);
+    if (pts.length === 2) map.fitBounds(pts, { padding: [60, 60] });
+    else if (pts.length === 1) map.setView(pts[0], 14);
+  }, [start, end, route, map]);
   return null;
 }
 
 // ── Single autocomplete input ─────────────────────────────────────────────
-function LocationInput({ placeholder, color, onSelect, defaultValue }) {
-  const [query,       setQuery]       = useState(defaultValue || "");
+function LocationInput({ placeholder, color, onSelect, defaultValue, label }) {
+  const [query,       setQuery]       = useState(label || defaultValue || "");
   const [suggestions, setSuggestions] = useState([]);
   const [open,        setOpen]        = useState(false);
   const [loading,     setLoading]     = useState(false);
   const debounce = useRef(null);
   const wrapRef  = useRef(null);
 
-  // Auto-geocode a preset default value
+  // Auto-populate from defaultValue — parses "lat, lng" strings directly,
+  // falls back to geocode API for human-readable address strings.
   useEffect(() => {
     if (!defaultValue) return;
+    // If defaultValue is a coordinate string like "1.2742, 103.8089", use it directly.
+    const coordMatch = defaultValue.match(/^\s*([-\d.]+)\s*,\s*([-\d.]+)\s*$/);
+    if (coordMatch) {
+      const lat = Number(coordMatch[1]);
+      const lng = Number(coordMatch[2]);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        onSelect({ name: label || defaultValue.trim(), lat, lng, formatted: defaultValue });
+        return;
+      }
+    }
+    // Otherwise geocode the address string via the Maps wrapper.
     fetch(`${WRAPPER}/geocode?address=${encodeURIComponent(defaultValue)}`)
       .then(r => r.json())
       .then(data => {
+        const lat = Number(data.lat);
+        const lng = Number(data.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
         const name = defaultValue.split(",")[0].trim();
-        onSelect({ name, lat: data.lat, lng: data.lng, formatted: defaultValue });
+        onSelect({ name, lat, lng, formatted: defaultValue });
       })
       .catch(() => {});
   }, [defaultValue]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -122,7 +149,7 @@ function LocationInput({ placeholder, color, onSelect, defaultValue }) {
 }
 
 // ── Main component ────────────────────────────────────────────────────────
-export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange, initialStart, initialEnd }) {
+export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange, initialStart, initialEnd, startLabel, endLabel }) {
   const [start,      setStart]      = useState(null);
   const [end,        setEnd]        = useState(null);
   const [route,      setRoute]      = useState(null);
@@ -141,7 +168,7 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
 
   // Fetch walking route from Google Maps Directions via wrapper
   useEffect(() => {
-    if (!start || !end) return;
+    if (!validCoord(start) || !validCoord(end)) return;
     setStatus("loading");
     setRoute(null);
 
@@ -184,14 +211,14 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
     setStatus("idle");
   }, []);
 
-  const mapCenter = start ? [start.lat, start.lng] : currentPos ?? SG;
+  const mapCenter = validCoord(start) ? [start.lat, start.lng] : currentPos ?? SG;
 
   return (
     <div className="border border-line rounded-2xl mb-5">
 
       {/* ── Inputs ── */}
       <div className="bg-card rounded-t-2xl border-b border-line p-4 flex flex-col gap-3" style={{ position: "relative", zIndex: 500 }}>
-        <LocationInput placeholder="Start location (e.g. MacRitchie Reservoir)" color="#4ade80" onSelect={handleStart} defaultValue={initialStart} />
+        <LocationInput placeholder="Start location (e.g. MacRitchie Reservoir)" color="#4ade80" onSelect={handleStart} defaultValue={initialStart} label={startLabel} />
 
         {/* Connector dots */}
         <div className="flex items-center gap-3 pl-[5px] -my-1">
@@ -200,7 +227,7 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
           </div>
         </div>
 
-        <LocationInput placeholder="End location (e.g. Bukit Timah Summit)" color="#f87171" onSelect={handleEnd} defaultValue={initialEnd} />
+        <LocationInput placeholder="End location (e.g. Bukit Timah Summit)" color="#f87171" onSelect={handleEnd} defaultValue={initialEnd} label={endLabel} />
 
         {/* Status strip */}
         {status === "loading" && (
@@ -222,7 +249,7 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
           </div>
         )}
         {status === "error" && (
-          <p className="text-xs text-red text-center pt-1">Could not find a walking route. Try more specific locations.</p>
+          <p className="text-xs text-muted text-center pt-1">Walking route unavailable — showing straight-line path between trailheads.</p>
         )}
       </div>
 
@@ -237,15 +264,24 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
         >
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
 
-          {currentPos && <Marker position={currentPos} icon={currentIcon} />}
-          {start      && <Marker position={[start.lat, start.lng]} icon={startIcon} />}
-          {end        && <Marker position={[end.lat,   end.lng]}   icon={endIcon}   />}
+          {currentPos && Number.isFinite(currentPos[0]) && Number.isFinite(currentPos[1]) && (
+            <Marker position={currentPos} icon={currentIcon} />
+          )}
+          {validCoord(start) && <Marker position={[start.lat, start.lng]} icon={startIcon} />}
+          {validCoord(end)   && <Marker position={[end.lat,   end.lng]}   icon={endIcon}   />}
+
+          <MapView start={start} end={end} route={route} />
 
           {route && (
-            <>
-              <Polyline positions={route} pathOptions={{ color: "#4ade80", weight: 5, opacity: 0.9 }} />
-              <FitBounds positions={route} />
-            </>
+            <Polyline positions={route} pathOptions={{ color: "#4ade80", weight: 5, opacity: 0.9 }} />
+          )}
+
+          {/* Fallback dashed line when routing fails but both markers are placed */}
+          {!route && status === "error" && validCoord(start) && validCoord(end) && (
+            <Polyline
+              positions={[[start.lat, start.lng], [end.lat, end.lng]]}
+              pathOptions={{ color: "#4ade80", weight: 2, opacity: 0.45, dashArray: "8 6" }}
+            />
           )}
         </MapContainer>
       </div>
