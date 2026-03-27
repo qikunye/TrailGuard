@@ -14,32 +14,26 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 # ── Mock incident data ───────────────────────────────────────────────────────
 RISK_DB: dict[str, dict] = {
-    "trail_mt_kinabalu": {
-        "trailId":                  "trail_mt_kinabalu",
-        "incidentsLast30Days":      7,
-        "incidentsLast90Days":      18,
-        "injuriesLast30Days":       3,
-        "fatalitiesAllTime":        2,
-        "mostCommonIncidentType":   "slip_and_fall",
-        "riskScore":                72,          # 0–100; higher = riskier
-        "riskTier":                 "high",      # low | medium | high | critical
-        "lastIncidentDate":         "2025-08-09",
-        "searchAndRescueCallouts":  2,
-        "notes":                    "Increased incidents during wet season (July–September).",
-    },
-    "trail_jungle_loop": {
-        "trailId":                  "trail_jungle_loop",
-        "incidentsLast30Days":      1,
-        "incidentsLast90Days":      3,
-        "injuriesLast30Days":       0,
-        "fatalitiesAllTime":        0,
-        "mostCommonIncidentType":   "dehydration",
-        "riskScore":                22,
-        "riskTier":                 "low",
-        "lastIncidentDate":         "2025-07-28",
-        "searchAndRescueCallouts":  0,
-        "notes":                    "Generally safe; carry sufficient water.",
-    },
+    "1":  {"trailId": "1",  "incidentsLast30Days": 1, "incidentsLast90Days": 4,
+           "riskScore": 18, "riskTier": "low",    "mostCommonIncidentType": "sprained_ankle"},
+    "2":  {"trailId": "2",  "incidentsLast30Days": 2, "incidentsLast90Days": 6,
+           "riskScore": 28, "riskTier": "low",    "mostCommonIncidentType": "dehydration"},
+    "3":  {"trailId": "3",  "incidentsLast30Days": 4, "incidentsLast90Days": 11,
+           "riskScore": 52, "riskTier": "medium", "mostCommonIncidentType": "slip_and_fall"},
+    "4":  {"trailId": "4",  "incidentsLast30Days": 0, "incidentsLast90Days": 2,
+           "riskScore": 12, "riskTier": "low",    "mostCommonIncidentType": "dehydration"},
+    "5":  {"trailId": "5",  "incidentsLast30Days": 0, "incidentsLast90Days": 1,
+           "riskScore": 10, "riskTier": "low",    "mostCommonIncidentType": "insect_sting"},
+    "6":  {"trailId": "6",  "incidentsLast30Days": 1, "incidentsLast90Days": 3,
+           "riskScore": 15, "riskTier": "low",    "mostCommonIncidentType": "sprained_ankle"},
+    "7":  {"trailId": "7",  "incidentsLast30Days": 0, "incidentsLast90Days": 2,
+           "riskScore": 14, "riskTier": "low",    "mostCommonIncidentType": "dehydration"},
+    "8":  {"trailId": "8",  "incidentsLast30Days": 2, "incidentsLast90Days": 5,
+           "riskScore": 30, "riskTier": "low",    "mostCommonIncidentType": "sprained_ankle"},
+    "9":  {"trailId": "9",  "incidentsLast30Days": 2, "incidentsLast90Days": 6,
+           "riskScore": 35, "riskTier": "medium", "mostCommonIncidentType": "slip_and_fall"},
+    "10": {"trailId": "10", "incidentsLast30Days": 1, "incidentsLast90Days": 4,
+           "riskScore": 22, "riskTier": "low",    "mostCommonIncidentType": "dehydration"},
 }
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -50,6 +44,27 @@ async def get_incident_risk(trail_id: str):
     if not data:
         raise HTTPException(status_code=404, detail=f"Risk data for trail '{trail_id}' not found.")
     return data
+
+
+# ── Swagger-aligned endpoint: IncidentsAPI / GetRecentIncidents ───────────────
+# Mirrors: GET /HikerProfileService/rest/IncidentsAPI/GetRecentIncidents/{trailId}/{recentDays}
+# Returns only the fields the Swagger contract guarantees.
+@app.get("/GetRecentIncidents/{trail_id}/{recent_days}", tags=["IncidentsAPI"])
+async def get_recent_incidents(trail_id: str, recent_days: int):
+    data = RISK_DB.get(trail_id)
+    if not data:
+        return {"Success": False, "incidentCount": 0, "ErrorCode": 404}
+    # Map recentDays to the closest available historical window.
+    # The Swagger only returns incidentCount — no richer metrics.
+    if recent_days <= 30:
+        count = data["incidentsLast30Days"]
+    else:
+        count = data["incidentsLast90Days"]
+    return {
+        "Success":       True,
+        "incidentCount": count,
+        "ErrorCode":     0,
+    }
 
 
 @app.get("/health", tags=["Ops"])

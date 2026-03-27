@@ -31,15 +31,36 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # ── Historical completion records (minutes) ──────────────────────────────────
 # In production this would be a database query.
 HISTORICAL_RECORDS: dict[str, list[int]] = {
-    "trail_mt_kinabalu": [
-        # Minutes taken by previous hikers (round-trip)
-        480, 510, 420, 540, 390, 600, 450, 480, 525, 465,
-        510, 570, 440, 490, 505, 480, 620, 415, 530, 470,
-    ],
-    "trail_jungle_loop": [
-        90, 100, 80, 110, 95, 105, 85, 115, 88, 92,
-        98, 102, 78, 108, 96, 89, 112, 83, 107, 94,
-    ],
+    # Easy (~9 km, flat): ~120–180 min round-trip
+    "1": [130, 145, 120, 160, 138, 152, 125, 170, 135, 148,
+          142, 155, 128, 165, 140, 132, 158, 122, 168, 144],
+    # Moderate (~11 km, varied): ~150–240 min
+    "2": [170, 190, 155, 210, 175, 200, 162, 220, 178, 185,
+          195, 215, 160, 205, 188, 173, 225, 158, 212, 182],
+    # Hard (steep summit, short but intense): ~90–150 min
+    "3": [100, 115, 90, 130, 105, 120, 95, 140, 108, 112,
+          118, 135, 88, 125, 110, 102, 145, 92, 132, 107],
+    # Easy (~4 km, coastal flat): ~60–90 min
+    "4": [68, 75, 62, 85, 70, 78, 65, 88, 72, 74,
+          79, 82, 60, 86, 71, 66, 90, 63, 84, 73],
+    # Easy (~5 km, flat wetland boardwalk): ~80–110 min
+    "5": [85, 95, 78, 105, 88, 98, 82, 108, 90, 93,
+          97, 103, 76, 107, 89, 83, 110, 80, 104, 92],
+    # Easy (~4 km loop): ~60–90 min
+    "6": [65, 72, 60, 82, 68, 76, 62, 85, 70, 73,
+          77, 80, 58, 84, 69, 63, 88, 61, 83, 71],
+    # Easy (~5 km, flat): ~80–110 min
+    "7": [88, 98, 80, 108, 92, 102, 84, 112, 94, 96,
+          100, 106, 78, 110, 91, 86, 115, 82, 107, 95],
+    # Moderate (~5 km, hilly): ~90–150 min
+    "8": [105, 120, 95, 138, 110, 125, 98, 145, 112, 118,
+          122, 135, 92, 142, 115, 107, 148, 94, 140, 119],
+    # Easy (~4 km, mangrove boardwalk): ~60–90 min
+    "9": [70, 78, 64, 88, 73, 80, 67, 90, 75, 77,
+          81, 85, 62, 87, 74, 68, 92, 65, 86, 76],
+    # Moderate (~5 km, secondary forest): ~90–140 min
+    "10": [100, 115, 88, 132, 105, 120, 92, 138, 108, 112,
+           118, 128, 85, 135, 110, 102, 142, 90, 130, 115],
 }
 
 # ── Adjustment factors ───────────────────────────────────────────────────────
@@ -49,11 +70,14 @@ FITNESS_FACTORS: dict[str, float] = {
     "low":    1.25,
 }
 
-SURFACE_FACTORS: dict[str, float] = {
-    "dry":  1.00,
-    "damp": 1.08,
-    "wet":  1.20,
-    "icy":  1.45,
+# Replaces SURFACE_FACTORS: surface state is NOT in the Swagger contract.
+# TrailConditionAPI/Condition returns highestSeverity, which we use instead.
+SEVERITY_FACTORS: dict[str, float] = {
+    "none":     1.00,
+    "minor":    1.08,
+    "moderate": 1.20,
+    "severe":   1.40,
+    "critical": 1.60,
 }
 
 # ── Request schema ────────────────────────────────────────────────────────────
@@ -73,9 +97,11 @@ def _fitness_factor(hiker: dict) -> float:
 
 
 def _condition_factor(conditions: dict) -> float:
-    surface = conditions.get("surfaceState", "dry")
-    base    = SURFACE_FACTORS.get(surface, 1.0)
-    hazards = conditions.get("activeHazards", 0)
+    # Use Swagger-backed fields: highestSeverity (TrailConditionAPI) and
+    # activeHazardCounts (TrailConditionAPI). surfaceState is not in Swagger.
+    severity = conditions.get("highestSeverity", "none")
+    base     = SEVERITY_FACTORS.get(severity, 1.0)
+    hazards  = conditions.get("activeHazardCounts", 0)
     # Each active hazard adds ~3% time overhead
     hazard_penalty = 1.0 + (hazards * 0.03)
     return base * hazard_penalty

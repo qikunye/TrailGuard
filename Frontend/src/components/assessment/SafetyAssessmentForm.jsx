@@ -512,7 +512,8 @@ function LoadingView({ currentStep }) {
 // ── Result View ───────────────────────────────────────────────────────────────
 function ResultView({ data, onReset }) {
   const cfg = DECISION_CONFIG[data.finalDecision] || DECISION_CONFIG.CAUTION;
-  const conf = Math.round((data.completionEstimate?.confidenceScore ?? 0.75) * 100);
+  // confidenceScore is at the top-level of the AssessmentResponse (from Evaluator)
+  const conf = Math.round((data.confidenceScore ?? 0.75) * 100);
 
   return (
     <>
@@ -533,7 +534,7 @@ function ResultView({ data, onReset }) {
               {cfg.label}
             </div>
             <div className="tg-decision-sub">
-              Trail: {data.trailConditions?.name || data.trailId} ·{" "}
+              Trail: {data.trailMeta?.trailName || data.trailConditions?.name || data.trailId} ·{" "}
               {data.plannedDate} {data.plannedStartTime}
             </div>
           </div>
@@ -576,21 +577,21 @@ function ResultView({ data, onReset }) {
             </div>
           </div>
           <div className="tg-data-item">
-            <div className="tg-data-key">Trail Surface</div>
+            <div className="tg-data-key">Hazard Severity</div>
             <div className="tg-data-val" style={{ textTransform: "capitalize" }}>
-              {data.trailConditions?.surfaceState || "—"}
+              {data.trailConditions?.highestSeverity || "—"}
             </div>
           </div>
           <div className="tg-data-item">
             <div className="tg-data-key">Active Hazards</div>
             <div className="tg-data-val">
-              {data.trailConditions?.activeHazards ?? "—"}
+              {data.trailConditions?.activeHazardCounts ?? "—"}
             </div>
           </div>
           <div className="tg-data-item">
-            <div className="tg-data-key">Risk Score</div>
+            <div className="tg-data-key">Incidents (30d)</div>
             <div className="tg-data-val">
-              {data.incidentRisk?.riskScore ?? "—"} / 100
+              {data.incidentData?.incidentCount30Days ?? "—"}
             </div>
           </div>
           <div className="tg-data-item">

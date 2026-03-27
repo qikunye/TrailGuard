@@ -2,90 +2,118 @@
 TRAILGUARD – Trail Safety Assessment Orchestrator
 Scenario 1: Stateless Composite Orchestration
 
-Flow:
-  POST /assess-trail
-    1. Validate User   → Hiker Profile Service
-    2. Fetch Weather   → Weather Wrapper
-    3. Check Hazards   → Trail Condition Service
-    4. Analyse Risk    → Incident Risk Service
-    5. Estimate Time   → Hike Completion Service
-    6. AI Evaluation   → Evaluator Wrapper  (Gemini)
-    7. Return JSON     → UI
+Swagger-contract calls (source of truth):
+  Step 1: GET /Capability/{userId}           → HikerProfileAPI
+  Step 2: GET /weather                       → Weather Wrapper (internal, no Swagger)
+  Step 3: GET /Condition/{trailId}           → TrailConditionAPI
+  Step 4: GET /GetTrail/{trailId}            → TrailDBAPI
+  Step 5: GET /GetRecentIncidents/{id}/30    → IncidentsAPI (30-day count)
+  Step 6: GET /GetRecentIncidents/{id}/90    → IncidentsAPI (90-day count)
+  Step 7: POST /estimate                     → Hike Completion Service (internal)
+  Step 8: POST /evaluate                     → Evaluator Wrapper (internal, OpenAI)
+
+Steps 2-6 are fired concurrently. Step 7 depends on 2-4. Step 8 depends on all.
+
+Field-validity rule: only fields returned by a Swagger method, the entry request,
+or deterministically derived from those are forwarded downstream.
+
+Unsupported fields REMOVED vs the original implementation:
+  - medicalFlags          (not in HikerProfileAPI/Capability)
+  - emergencyContact      (not in HikerProfileAPI/Capability)
+  - name (hiker)          (not in HikerProfileAPI/Capability)
+  - injuriesLast30Days    (not in IncidentsAPI/GetRecentIncidents)
+  - fatalitiesAllTime     (not in IncidentsAPI/GetRecentIncidents)
+  - mostCommonIncidentType(not in IncidentsAPI/GetRecentIncidents)
+  - riskScore             (not in IncidentsAPI/GetRecentIncidents)
+  - riskTier              (not in IncidentsAPI/GetRecentIncidents)
+  - lastIncidentDate      (not in IncidentsAPI/GetRecentIncidents)
+  - searchAndRescueCallouts (not in any Swagger endpoint)
+  - distanceKm            (not in TrailDBAPI/GetTrail or TrailConditionAPI/Condition)
+  - elevationGainM        (not in any Swagger endpoint)
+  - surfaceState          (not in TrailConditionAPI/Condition)
+  - hazardDetails[]       (not in TrailConditionAPI/Condition — only hazardTypes[])
 """
 
 import asyncio
 import logging
+import os
+import uuid
 from datetime import datetime
-from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# ── Logging ─────────────────────────────────────────────────────────────────
+# ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("TrailSafetyOrchestrator")
 
-# ── App ──────────────────────────────────────────────────────────────────────
+# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="TRAILGUARD – Trail Safety Assessment Orchestrator",
-    version="1.0.0",
-    description="Stateless composite orchestration for trail safety evaluation.",
+    version="2.0.0",
+    description="Stateless composite orchestration. All fields validated against Swagger contracts.",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # tighten in production / via Kong
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── Service URLs (override via environment variables in production) ───────────
-import os
-
-HIKER_PROFILE_URL    = os.getenv("HIKER_PROFILE_URL",    "http://localhost:8001")
-TRAIL_CONDITION_URL  = os.getenv("TRAIL_CONDITION_URL",  "http://localhost:8002")
-INCIDENT_RISK_URL    = os.getenv("INCIDENT_RISK_URL",    "http://localhost:8003")
-HIKE_COMPLETION_URL  = os.getenv("HIKE_COMPLETION_URL",  "http://localhost:8004")
-WEATHER_WRAPPER_URL  = os.getenv("WEATHER_WRAPPER_URL",  "http://localhost:8005")
-EVALUATOR_WRAPPER_URL= os.getenv("EVALUATOR_WRAPPER_URL","http://localhost:8006")
+# ── Service URLs (override via environment variables) ────────────────────────
+HIKER_PROFILE_URL     = os.getenv("HIKER_PROFILE_URL",     "http://localhost:8001")
+TRAIL_CONDITION_URL   = os.getenv("TRAIL_CONDITION_URL",   "http://localhost:8002")
+INCIDENT_RISK_URL     = os.getenv("INCIDENT_RISK_URL",     "http://localhost:8003")
+HIKE_COMPLETION_URL   = os.getenv("HIKE_COMPLETION_URL",   "http://localhost:8004")
+WEATHER_WRAPPER_URL   = os.getenv("WEATHER_WRAPPER_URL",   "http://localhost:8005")
+EVALUATOR_WRAPPER_URL = os.getenv("EVALUATOR_WRAPPER_URL", "http://localhost:8006")
 
 TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+
 
 # ── Request / Response schemas ───────────────────────────────────────────────
 
 class AssessmentRequest(BaseModel):
-    userId:            str  = Field(..., example="usr_001")
-    trailId:           str  = Field(..., example="trail_mt_kinabalu")
-    plannedDate:       str  = Field(..., example="2025-08-15")
-    plannedStartTime:  str  = Field(..., example="06:30")
-    declaredExpLevel:  str  = Field(..., example="intermediate",
-                                    description="beginner | intermediate | advanced | expert")
+    userId:            str = Field(..., example="usr_001")
+    trailId:           str = Field(..., example="trail_mt_kinabalu")
+    plannedDate:       str = Field(..., example="2025-08-15")
+    plannedStartTime:  str = Field(..., example="06:30")
+    declaredExpLevel:  str = Field(..., example="intermediate",
+                                   description="beginner | intermediate | advanced | expert")
 
 
 class AssessmentResponse(BaseModel):
-    requestId:       str
-    userId:          str
-    trailId:         str
-    plannedDate:     str
-    plannedStartTime:str
-    hikerProfile:    dict
-    weatherData:     dict
-    trailConditions: dict
-    incidentRisk:    dict
+    requestId:          str
+    userId:             str
+    trailId:            str
+    plannedDate:        str
+    plannedStartTime:   str
+    # hikerProfile: only Swagger-contract fields from HikerProfileAPI/Capability
+    hikerProfile:       dict
+    # weatherData: fields from Weather Wrapper (internal service, Open-Meteo)
+    weatherData:        dict
+    # trailConditions: Swagger fields from TrailConditionAPI/Condition
+    trailConditions:    dict
+    # trailMeta: Swagger fields from TrailDBAPI/GetTrail
+    trailMeta:          dict
+    # incidentData: Swagger fields from IncidentsAPI/GetRecentIncidents
+    incidentData:       dict
     completionEstimate: dict
-    finalDecision:   str          # GO | CAUTION | DO_NOT_GO
-    reasoning:       str
-    warnings:        list[str]
-    evaluatedAt:     str
+    finalDecision:      str           # GO | CAUTION | DO_NOT_GO
+    confidenceScore:    float         # 0.0–1.0 from Evaluator
+    reasoning:          str
+    keyReasons:         list[str]     # 3-5 short bullet factors from Evaluator
+    warnings:           list[str]
+    evaluatedAt:        str
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 async def _get(client: httpx.AsyncClient, url: str, params: dict = None) -> dict:
-    """GET with structured error handling."""
     try:
         resp = await client.get(url, params=params, timeout=TIMEOUT)
         resp.raise_for_status()
@@ -99,7 +127,6 @@ async def _get(client: httpx.AsyncClient, url: str, params: dict = None) -> dict
 
 
 async def _post(client: httpx.AsyncClient, url: str, payload: dict) -> dict:
-    """POST with structured error handling."""
     try:
         resp = await client.post(url, json=payload, timeout=TIMEOUT)
         resp.raise_for_status()
@@ -117,79 +144,162 @@ async def _post(client: httpx.AsyncClient, url: str, payload: dict) -> dict:
 @app.post("/assess-trail", response_model=AssessmentResponse, tags=["Assessment"])
 async def assess_trail(req: AssessmentRequest):
     """
-    Orchestrates a full trail safety assessment across all downstream services.
-    This endpoint is STATELESS – nothing is persisted.
+    Orchestrates a full trail safety assessment.
+    All downstream calls use Swagger-contract endpoints only.
+    This endpoint is STATELESS — nothing is persisted.
     """
-    import uuid
     request_id = str(uuid.uuid4())
     log.info("▶ Assessment started | requestId=%s userId=%s trailId=%s",
              request_id, req.userId, req.trailId)
 
     async with httpx.AsyncClient() as client:
 
-        # ── Step 1: Validate User via Hiker Profile Service ──────────────────
-        log.info("Step 1 – Fetching hiker profile for userId=%s", req.userId)
-        hiker_profile = await _get(
-            client,
-            f"{HIKER_PROFILE_URL}/hiker/{req.userId}",
+        # ── Step 1: HikerProfileAPI / Capability ─────────────────────────────
+        # Swagger: GET /HikerProfileService/rest/HikerProfileAPI/Capability/{userId}
+        # Returns: fitnessLevel, experienceRating, totalHikesCompleted, typicalPace
+        log.info("Step 1 – HikerProfileAPI/Capability userId=%s", req.userId)
+        hiker_raw = await _get(client, f"{HIKER_PROFILE_URL}/Capability/{req.userId}")
+
+        if not hiker_raw.get("Success", True):
+            # Hiker not in DB (container may have restarted). Derive from declaredExpLevel.
+            log.warning("Hiker '%s' not in profile DB — using declaredExpLevel '%s' as fallback",
+                        req.userId, req.declaredExpLevel)
+            _fitness_map = {"beginner": "low", "intermediate": "medium", "advanced": "high", "expert": "high"}
+            hiker_raw = {
+                "fitnessLevel":        _fitness_map.get(req.declaredExpLevel, "medium"),
+                "experienceRating":    req.declaredExpLevel,
+                "totalHikesCompleted": 0,
+                "typicalPace":         15,
+                "Success":             True,
+                "ErrorCode":           0,
+            }
+
+        # Strict: keep only Swagger-contract fields
+        hiker_profile = {
+            "fitnessLevel":        hiker_raw.get("fitnessLevel"),
+            "experienceRating":    hiker_raw.get("experienceRating"),
+            "totalHikesCompleted": hiker_raw.get("totalHikesCompleted"),
+            "typicalPace":         hiker_raw.get("typicalPace"),
+        }
+        log.info("Step 1 ✓ hiker=%s", hiker_profile)
+
+        # ── Steps 2-6: Concurrent I/O-bound calls ────────────────────────────
+        log.info("Steps 2-6 – Concurrent fetch: weather, conditions, trail meta, incidents×2")
+
+        weather_task     = _get(client, f"{WEATHER_WRAPPER_URL}/weather",
+                                params={"trailId": req.trailId,
+                                        "date":    req.plannedDate,
+                                        "time":    req.plannedStartTime})
+        # Swagger: GET /HikerProfileService/rest/TrailConditionAPI/Condition/{trailId}
+        condition_task   = _get(client, f"{TRAIL_CONDITION_URL}/Condition/{req.trailId}")
+        # Swagger: GET /HikerProfileService/rest/TrailDBAPI/GetTrail/{trailId}
+        trail_meta_task  = _get(client, f"{TRAIL_CONDITION_URL}/GetTrail/{req.trailId}")
+        # Swagger: GET /HikerProfileService/rest/IncidentsAPI/GetRecentIncidents/{id}/{days}
+        incidents_30_task = _get(client, f"{INCIDENT_RISK_URL}/GetRecentIncidents/{req.trailId}/30")
+        incidents_90_task = _get(client, f"{INCIDENT_RISK_URL}/GetRecentIncidents/{req.trailId}/90")
+
+        (
+            weather_data,
+            condition_raw,
+            trail_meta_raw,
+            incidents_30_raw,
+            incidents_90_raw,
+        ) = await asyncio.gather(
+            weather_task,
+            condition_task,
+            trail_meta_task,
+            incidents_30_task,
+            incidents_90_task,
         )
-        # Guard: if the user profile is not found the service returns 404,
-        # which _get() will surface as a 502. You can add custom logic here.
-        log.info("Step 1 ✓ hikerProfile=%s", hiker_profile)
+        log.info("Steps 2-6 ✓")
 
-        # ── Steps 2-4: Concurrent I/O-bound calls ────────────────────────────
-        # Weather, Trail Conditions and Incident Risk do not depend on each
-        # other so we fire them concurrently to reduce total latency.
-        log.info("Steps 2-4 – Concurrent fetch: weather, trail conditions, incident risk")
-        weather_task    = _get(client, f"{WEATHER_WRAPPER_URL}/weather",
-                               params={"trailId": req.trailId, "date": req.plannedDate,
-                                       "time": req.plannedStartTime})
-        conditions_task = _get(client, f"{TRAIL_CONDITION_URL}/trail/{req.trailId}/conditions")
-        risk_task       = _get(client, f"{INCIDENT_RISK_URL}/risk/{req.trailId}")
+        # Strict: keep only Swagger-contract fields for each response
 
-        weather_data, trail_conditions, incident_risk = await asyncio.gather(
-            weather_task, conditions_task, risk_task
+        # TrailConditionAPI/Condition fields
+        trail_conditions = {
+            "operationalStatus":  condition_raw.get("operationalStatus"),
+            "activeHazardCounts": condition_raw.get("activeHazardCounts"),
+            "highestSeverity":    condition_raw.get("highestSeverity"),
+            "hazardTypes":        condition_raw.get("hazardTypes", []),
+        }
+
+        # TrailDBAPI/GetTrail fields
+        trail_meta = {
+            "trailId":           trail_meta_raw.get("trailId"),
+            "trailName":         trail_meta_raw.get("trailName"),
+            "difficulty":        trail_meta_raw.get("difficulty"),
+            "operationalStatus": trail_meta_raw.get("operationalStatus"),
+        }
+
+        # IncidentsAPI/GetRecentIncidents fields — incidentCount only per Swagger
+        incident_data = {
+            "incidentCount30Days": incidents_30_raw.get("incidentCount", 0),
+            "incidentCount90Days": incidents_90_raw.get("incidentCount", 0),
+        }
+        log.info("Steps 2-6 ✓ conditions=%s trail=%s incidents=%s",
+                 trail_conditions, trail_meta, incident_data)
+
+        # Guard: closed trail → force DO_NOT_GO early
+        is_closed = (
+            trail_conditions.get("operationalStatus") == "closed"
+            or trail_meta.get("operationalStatus") == "closed"
         )
-        log.info("Steps 2-4 ✓ weather=%s conditions=%s risk=%s",
-                 weather_data, trail_conditions, incident_risk)
 
-        # ── Step 5: Estimate Completion Time ─────────────────────────────────
-        log.info("Step 5 – Estimating hike completion time")
+        # ── Step 7: Hike Completion Service ──────────────────────────────────
+        log.info("Step 7 – Hike completion estimate")
         completion_estimate = await _post(
             client,
             f"{HIKE_COMPLETION_URL}/estimate",
             payload={
-                "trailId":         req.trailId,
+                "trailId":          req.trailId,
+                "plannedStartTime": req.plannedStartTime,
+                # Pass only fields the completion service reads:
+                #   hikerProfile.fitnessLevel  (Swagger-backed)
+                #   trailConditions.highestSeverity + activeHazardCounts (Swagger-backed)
+                #   weatherData.severity  (Weather Wrapper internal field)
                 "hikerProfile":    hiker_profile,
-                "plannedStartTime":req.plannedStartTime,
                 "trailConditions": trail_conditions,
                 "weatherData":     weather_data,
             },
         )
-        log.info("Step 5 ✓ completionEstimate=%s", completion_estimate)
+        log.info("Step 7 ✓ estimate=%s", completion_estimate)
 
-        # ── Step 6: AI Evaluation via Evaluator Wrapper ───────────────────────
-        log.info("Step 6 – Sending consolidated payload to Evaluator Wrapper (Gemini)")
+        # ── Step 8: Evaluator Wrapper (OpenAI) ───────────────────────────────
+        log.info("Step 8 – AI evaluation")
         evaluator_payload = {
-            "userId":              req.userId,
-            "trailId":             req.trailId,
-            "plannedDate":         req.plannedDate,
-            "plannedStartTime":    req.plannedStartTime,
-            "declaredExpLevel":    req.declaredExpLevel,
-            "hikerProfile":        hiker_profile,
-            "weatherData":         weather_data,
-            "trailConditions":     trail_conditions,
-            "incidentRisk":        incident_risk,
-            "completionEstimate":  completion_estimate,
+            "userId":             req.userId,
+            "trailId":            req.trailId,
+            "plannedDate":        req.plannedDate,
+            "plannedStartTime":   req.plannedStartTime,
+            "declaredExpLevel":   req.declaredExpLevel,
+            # Swagger-backed hiker fields only
+            "hikerProfile":       hiker_profile,
+            # Weather Wrapper fields (internal service)
+            "weatherData":        weather_data,
+            # Swagger-backed trail fields
+            "trailConditions":    trail_conditions,
+            "trailMeta":          trail_meta,
+            # Swagger-backed incident fields (incidentCount only)
+            "incidentData":       incident_data,
+            "completionEstimate": completion_estimate,
+            "isTrailClosed":      is_closed,
         }
         evaluation = await _post(
             client,
             f"{EVALUATOR_WRAPPER_URL}/evaluate",
             payload=evaluator_payload,
         )
-        log.info("Step 6 ✓ finalDecision=%s", evaluation.get("finalDecision"))
+        log.info("Step 8 ✓ finalDecision=%s", evaluation.get("finalDecision"))
 
-    # ── Step 7: Build and return final response ───────────────────────────────
+    # ── Step 9: Build and return final response ───────────────────────────────
+    # Override decision if trail is closed regardless of AI output
+    final_decision = evaluation.get("finalDecision", "CAUTION")
+    if is_closed and final_decision != "DO_NOT_GO":
+        final_decision = "DO_NOT_GO"
+        evaluation.setdefault("warnings", [])
+        if "Trail is closed." not in evaluation["warnings"]:
+            evaluation["warnings"].insert(0, "Trail is closed.")
+
     response = AssessmentResponse(
         requestId=          request_id,
         userId=             req.userId,
@@ -199,10 +309,13 @@ async def assess_trail(req: AssessmentRequest):
         hikerProfile=       hiker_profile,
         weatherData=        weather_data,
         trailConditions=    trail_conditions,
-        incidentRisk=       incident_risk,
+        trailMeta=          trail_meta,
+        incidentData=       incident_data,
         completionEstimate= completion_estimate,
-        finalDecision=      evaluation.get("finalDecision", "CAUTION"),
+        finalDecision=      final_decision,
+        confidenceScore=    float(evaluation.get("confidenceScore", 0.75)),
         reasoning=          evaluation.get("reasoning", ""),
+        keyReasons=         evaluation.get("keyReasons", []),
         warnings=           evaluation.get("warnings", []),
         evaluatedAt=        datetime.utcnow().isoformat() + "Z",
     )
@@ -211,11 +324,66 @@ async def assess_trail(req: AssessmentRequest):
     return response
 
 
+# ── Profile proxy endpoints (frontend calls API_BASE = port 8000) ─────────────
+# These thin proxies let the frontend talk to HikerProfile through one port.
+
+@app.post("/hiker-profile", tags=["Profile"])
+async def create_hiker_profile(body: dict):
+    """
+    Proxy: POST /AddUser on HikerProfile atomic service.
+    Accepts: name, fitnessLevel, age, bio, totalHikesCompleted
+    Returns: userId, Success, ErrorCode, ErrorMessage
+    """
+    async with httpx.AsyncClient() as client:
+        return await _post(client, f"{HIKER_PROFILE_URL}/AddUser", payload=body)
+
+
+@app.put("/hiker-profile/{user_id}", tags=["Profile"])
+async def update_hiker_profile(user_id: str, body: dict):
+    """
+    Proxy: PUT /Update/{userId} on HikerProfile atomic service.
+    Accepts: name, fitnessLevel, age, bio, totalHikesCompleted (all optional)
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.put(
+                f"{HIKER_PROFILE_URL}/Update/{user_id}",
+                json=body, timeout=TIMEOUT,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=503, detail=f"Cannot reach HikerProfile service: {e}")
+
+
+@app.get("/hiker-profile/{user_id}", tags=["Profile"])
+async def get_hiker_profile_capability(user_id: str):
+    """
+    Proxy: GET /Capability/{userId} on HikerProfile atomic service.
+    Returns: fitnessLevel, experienceRating, totalHikesCompleted, typicalPace
+    """
+    async with httpx.AsyncClient() as client:
+        return await _get(client, f"{HIKER_PROFILE_URL}/Capability/{user_id}")
+
+
+# ── Trail list proxy (for frontend dropdown) ──────────────────────────────────
+
+@app.get("/trails", tags=["Trails"])
+async def get_all_trails():
+    """
+    Proxy: GET /GetAllTrails on Trail Condition atomic service.
+    Returns summary list of trails for the registration dropdown.
+    Fields: trailId, trailName, difficulty, operationalStatus (Swagger-aligned).
+    """
+    async with httpx.AsyncClient() as client:
+        return await _get(client, f"{TRAIL_CONDITION_URL}/GetAllTrails")
+
+
 # ── Health check ─────────────────────────────────────────────────────────────
 
 @app.get("/health", tags=["Ops"])
 async def health():
-    return {"status": "ok", "service": "Trail_Safety_Assessment_Service", "version": "1.0.0"}
+    return {"status": "ok", "service": "Trail_Safety_Assessment_Service", "version": "2.0.0"}
 
 
 # ── Entrypoint ───────────────────────────────────────────────────────────────

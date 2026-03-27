@@ -36,8 +36,16 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 # ── Trail → GPS coordinate mapping ───────────────────────────────────────────
 TRAIL_COORDS: dict[str, tuple[float, float]] = {
-    "trail_mt_kinabalu": (6.0750, 116.5583),   # Mt Kinabalu, Sabah
-    "trail_jungle_loop": (3.1390,  101.6869),  # Kuala Lumpur surroundings
+    "1":  (1.2742, 103.8089),  # Southern Ridges Loop
+    "2":  (1.3441, 103.8198),  # MacRitchie Reservoir Trail
+    "3":  (1.3520, 103.7767),  # Bukit Timah Summit Trail
+    "4":  (1.2650, 103.8025),  # Labrador Nature Reserve Trail
+    "5":  (1.4473, 103.7237),  # Sungei Buloh Wetland Walk
+    "6":  (1.3474, 103.7597),  # Bukit Batok Nature Park Loop
+    "7":  (1.4044, 103.9592),  # Pulau Ubin Chek Jawa Trail
+    "8":  (1.2933, 103.7837),  # Kent Ridge Park Trail
+    "9":  (1.4410, 103.7983),  # Admiralty Park Mangrove Trail
+    "10": (1.3241, 103.7681),  # Clementi Forest Trail
 }
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"

@@ -113,8 +113,8 @@ services:
 
   evaluator-wrapper:
     build:
-      context: ./Services/atomic
-      dockerfile: Dockerfile
+      context: ./Services
+      dockerfile: wrappers/Dockerfile
       args:
         SERVICE: Evaluator_Wrapper
     ports:
