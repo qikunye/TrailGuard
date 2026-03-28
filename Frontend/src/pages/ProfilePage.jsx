@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import Navbar from "../components/shared/Navbar.jsx";
 import { useAuth } from "../hooks/useAuth.js";
+import { useProfile } from "../hooks/useProfile.js";
 import { deriveExpLevel } from "../hooks/useAssessment.js";
 
 const ORCHESTRATOR_URL =
@@ -12,14 +14,12 @@ const wrap  = "flex items-center bg-surface border border-line rounded-full px-4
 const input = "flex-1 bg-transparent border-none outline-none text-fg text-[0.9rem] py-3 font-[inherit] placeholder:text-muted min-w-0";
 const lbl   = "block text-[0.82rem] font-semibold tracking-[0.04em] text-fg mb-1.5 font-mono";
 
-// Experience tier badge colours
 const TIER_COLORS = {
   beginner:     "text-blue-400 bg-blue-400/10 border-blue-400/20",
   intermediate: "text-amber-400 bg-amber-400/10 border-amber-400/20",
   advanced:     "text-primary  bg-primary/10   border-primary/20",
 };
 
-// Tier thresholds (mirrors Hiker_Profile_Service._derive_experience_rating)
 const TIER_LABELS = {
   beginner:     "Beginner  (0–4 hikes)",
   intermediate: "Intermediate  (5–14 hikes)",
@@ -28,39 +28,42 @@ const TIER_LABELS = {
 
 export default function ProfilePage() {
   const { currentUser } = useAuth();
+  const { profile, saveProfile, isSetup } = useProfile();
+  const navigate = useNavigate();
+
   const [saving,  setSaving]  = useState(false);
   const [saved,   setSaved]   = useState(false);
   const [saveErr, setSaveErr] = useState("");
 
-  // ── Fields aligned to HikerProfileAPI ─────────────────────────────────────
-  // HikerProfileAPI AddUser/Update accepts: name, fitnessLevel, age, bio
-  // totalHikesCompleted: accepted by our impl; not in formal Swagger spec
-  // phone + emergencyContacts: UI-only, not sent to HikerProfileAPI
   const [form, setForm] = useState({
-    // HikerProfileAPI-backed fields
     name:                "",
-    fitnessLevel:        "medium",   // low | medium | high
+    fitnessLevel:        "medium",
     age:                 "",
     bio:                 "",
     totalHikesCompleted: 0,
-    // UI-only fields (stored locally, not sent to HikerProfileAPI)
     phone:               "",
     emergencyContacts:   [{ name: "", phone: "", relation: "" }],
   });
 
-  // ── Load from localStorage on mount ───────────────────────────────────────
+  // Load saved profile (scoped to this Firebase user) on mount
   useEffect(() => {
-    const stored = localStorage.getItem("tg_profile");
-    if (stored) {
-      try { setForm(JSON.parse(stored)); } catch (_) { /* ignore */ }
+    if (profile && Object.keys(profile).length > 0) {
+      setForm(f => ({
+        ...f,
+        ...profile,
+        // Ensure emergencyContacts is always a valid array
+        emergencyContacts: Array.isArray(profile.emergencyContacts) && profile.emergencyContacts.length > 0
+          ? profile.emergencyContacts
+          : f.emergencyContacts,
+      }));
     } else if (currentUser?.displayName) {
       setForm(f => ({ ...f, name: currentUser.displayName }));
     }
-  }, [currentUser]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.uid]);
 
   const derivedTier = deriveExpLevel(Number(form.totalHikesCompleted) || 0);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
   const set = (field, val) => setForm(f => ({ ...f, [field]: val }));
   const setContact = (i, field, val) =>
     setForm(f => ({
@@ -70,28 +73,25 @@ export default function ProfilePage() {
       ),
     }));
 
-  // ── Save handler ──────────────────────────────────────────────────────────
   async function handleSave(e) {
     e.preventDefault();
     setSaving(true);
     setSaveErr("");
+
+    const existingUserId = profile.userId;
+
+    const apiPayload = {
+      name:                form.name || currentUser?.displayName || "Unknown",
+      fitnessLevel:        form.fitnessLevel,
+      age:                 form.age ? Number(form.age) : null,
+      bio:                 form.bio,
+      totalHikesCompleted: Number(form.totalHikesCompleted) || 0,
+    };
+
+    let userId = existingUserId;
+
     try {
-      const storedProfile = JSON.parse(localStorage.getItem("tg_profile") || "{}");
-      const existingUserId = storedProfile.userId;
-
-      // Build HikerProfileAPI payload (only API-backed fields)
-      const apiPayload = {
-        name:                form.name || currentUser?.displayName || "Unknown",
-        fitnessLevel:        form.fitnessLevel,
-        age:                 form.age ? Number(form.age) : null,
-        bio:                 form.bio,
-        totalHikesCompleted: Number(form.totalHikesCompleted) || 0,
-      };
-
-      let userId = existingUserId;
-
       if (existingUserId) {
-        // Update existing profile — response may contain a new OutSystems userId
         const res = await fetch(`${ORCHESTRATOR_URL}/hiker-profile/${existingUserId}`, {
           method:  "PUT",
           headers: { "Content-Type": "application/json" },
@@ -99,13 +99,9 @@ export default function ProfilePage() {
         });
         if (res.ok) {
           const data = await res.json();
-          // OutSystems assigned a canonical integer userId — adopt it
-          if (data.userId && data.userId !== existingUserId) {
-            userId = data.userId;
-          }
+          if (data.userId && data.userId !== existingUserId) userId = data.userId;
         }
       } else {
-        // Create new profile
         const res = await fetch(`${ORCHESTRATOR_URL}/hiker-profile`, {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
@@ -116,34 +112,39 @@ export default function ProfilePage() {
           userId = data.userId;
         }
       }
+    } catch {
+      setSaveErr("Could not reach the profile service. Saved locally only.");
+    }
 
-      // Persist full form (including UI-only fields) to localStorage
-      localStorage.setItem("tg_profile", JSON.stringify({ ...form, userId }));
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (err) {
-      setSaveErr("Could not reach the profile service. Changes saved locally.");
-      // Still save locally so the flow works offline/in dev
-      const storedProfile = JSON.parse(localStorage.getItem("tg_profile") || "{}");
-      localStorage.setItem("tg_profile", JSON.stringify({ ...form, userId: storedProfile.userId }));
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } finally {
-      setSaving(false);
+    saveProfile({ ...form, userId });
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+
+    // If this was the first save (just got a userId), send to dashboard
+    if (!existingUserId && userId) {
+      setTimeout(() => navigate("/dashboard", { replace: true }), 1200);
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col min-h-screen relative z-[1]">
       <Navbar />
       <main className="flex-1 p-6 max-w-[1100px] mx-auto w-full">
         <h1 className="text-[1.4rem] font-bold text-fg mb-1">Profile</h1>
+
+        {/* Banner for new users who haven't set up yet */}
+        {!isSetup && (
+          <div className="bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3 mb-5 text-sm text-amber-400">
+            Complete your profile to access TrailGuard. Fill in your details and tap <strong>Save Profile</strong>.
+          </div>
+        )}
+
         <p className="text-sm text-muted mb-6">Hiker info &amp; emergency contacts</p>
 
         {saved && (
           <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-green-bg text-green border border-green-line text-sm mb-4">
-            <span>✓</span><span>Profile saved successfully</span>
+            <span>✓</span><span>Profile saved{!isSetup ? " — redirecting…" : ""}</span>
           </div>
         )}
         {saveErr && (
@@ -164,43 +165,42 @@ export default function ProfilePage() {
               <div>
                 <div className="font-semibold text-fg">{currentUser?.displayName ?? "—"}</div>
                 <div className="text-xs text-muted">{currentUser?.email}</div>
+                {profile.userId && (
+                  <div className="text-xs text-primary font-mono mt-0.5">User #{profile.userId}</div>
+                )}
               </div>
             </div>
 
-            {/* name — HikerProfileAPI field */}
             <div className="mb-4">
-              <label className={lbl}>Full Name <span className="text-primary/50 font-normal">(API-backed)</span></label>
+              <label className={lbl}>Full Name</label>
               <div className={wrap}>
                 <input type="text" placeholder="Your name"
                   value={form.name} onChange={e => set("name", e.target.value)} className={input} />
               </div>
             </div>
 
-            {/* phone — UI-only */}
-            <div className="mb-4">
+            <div className="mb-0">
               <label className={lbl}>
-                Phone Number <span className="text-muted font-normal">(local only — used for emergency reports)</span>
+                Phone Number <span className="text-muted font-normal">(used for emergency SMS confirmation)</span>
               </label>
               <div className={wrap}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted shrink-0">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.11 13 19.79 19.79 0 0 1 1.09 4.24 2 2 0 0 1 3.05 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
                 </svg>
-                <input type="tel" placeholder="+65 9123 4567"
+                <input type="tel" placeholder="+6591234567"
                   value={form.phone} onChange={e => set("phone", e.target.value)} className={input} />
               </div>
             </div>
           </div>
 
-          {/* ── Hiker Info (HikerProfileAPI-backed) ── */}
+          {/* ── Hiker Info ── */}
           <div className="bg-card border border-line rounded-2xl p-6 mb-4">
             <h2 className="text-[0.95rem] font-semibold text-fg mb-1">Hiker Info</h2>
-            <p className="text-xs text-muted mb-4">Fields used by the Trail Safety Assessment evaluator</p>
+            <p className="text-xs text-muted mb-4">Used by the Trail Safety Assessment evaluator</p>
 
             <div className="grid grid-cols-2 gap-3 mb-4">
-
-              {/* fitnessLevel — HikerProfileAPI field */}
               <div>
-                <label className={lbl}>Fitness Level <span className="text-primary/50 font-normal">(API-backed)</span></label>
+                <label className={lbl}>Fitness Level</label>
                 <div className={`${wrap} pr-4`}>
                   <select value={form.fitnessLevel} onChange={e => set("fitnessLevel", e.target.value)}
                     className="flex-1 bg-transparent border-none outline-none text-fg text-[0.9rem] py-3 cursor-pointer">
@@ -211,9 +211,8 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* age — HikerProfileAPI field */}
               <div>
-                <label className={lbl}>Age <span className="text-primary/50 font-normal">(API-backed)</span></label>
+                <label className={lbl}>Age</label>
                 <div className={wrap}>
                   <input type="number" min="10" max="100" placeholder="e.g. 28"
                     value={form.age} onChange={e => set("age", e.target.value)} className={input} />
@@ -221,12 +220,8 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* totalHikesCompleted — accepted by our AddUser impl; drives experienceRating */}
             <div className="mb-4">
-              <label className={lbl}>
-                Total Hikes Completed
-                <span className="text-muted font-normal ml-1">(drives Experience Rating)</span>
-              </label>
+              <label className={lbl}>Total Hikes Completed</label>
               <div className="flex items-center gap-3">
                 <div className={`${wrap} flex-1`}>
                   <input type="number" min="0" placeholder="0"
@@ -234,7 +229,6 @@ export default function ProfilePage() {
                     onChange={e => set("totalHikesCompleted", Math.max(0, parseInt(e.target.value) || 0))}
                     className={input} />
                 </div>
-                {/* +/- quick buttons */}
                 <button type="button" onClick={() => set("totalHikesCompleted", Math.max(0, (Number(form.totalHikesCompleted) || 0) - 1))}
                   className="w-9 h-9 rounded-full border border-line text-muted bg-surface text-lg flex items-center justify-center hover:border-primary hover:text-fg transition-colors cursor-pointer">−</button>
                 <button type="button" onClick={() => set("totalHikesCompleted", (Number(form.totalHikesCompleted) || 0) + 1)}
@@ -242,13 +236,10 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* Derived experience tier — read-only display */}
             <div className="mb-4 p-3 bg-surface rounded-xl border border-line">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className={`text-[0.82rem] font-mono font-semibold tracking-[0.04em] mb-0.5 ${lbl}`}>
-                    Experience Rating <span className="text-muted font-normal">(derived · read-only)</span>
-                  </div>
+                  <div className={lbl}>Experience Rating <span className="text-muted font-normal">(derived)</span></div>
                   <div className="text-xs text-muted">{TIER_LABELS[derivedTier]}</div>
                 </div>
                 <span className={`px-3 py-1 rounded-full text-xs font-semibold border capitalize ${TIER_COLORS[derivedTier]}`}>
@@ -257,9 +248,8 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* bio — HikerProfileAPI field */}
             <div>
-              <label className={lbl}>Bio / Notes <span className="text-primary/50 font-normal">(API-backed)</span></label>
+              <label className={lbl}>Bio / Notes</label>
               <textarea value={form.bio} onChange={e => set("bio", e.target.value)}
                 placeholder="Brief intro, hiking style, known conditions..."
                 rows={2}
@@ -267,7 +257,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* ── Emergency Contacts (UI-only) ── */}
+          {/* ── Emergency Contacts ── */}
           <div className="bg-card border border-line rounded-2xl p-6 mb-4">
             <div className="flex items-center justify-between mb-1">
               <h2 className="text-[0.95rem] font-semibold text-fg">Emergency Contacts</h2>
@@ -277,7 +267,7 @@ export default function ProfilePage() {
                 + Add
               </button>
             </div>
-            <p className="text-xs text-muted mb-4">Stored locally — used when submitting emergency incident reports</p>
+            <p className="text-xs text-muted mb-4">Used when submitting emergency incident reports</p>
             <div className="flex flex-col gap-3">
               {form.emergencyContacts.map((c, i) => (
                 <div key={i} className="bg-surface rounded-xl p-3">
@@ -301,7 +291,7 @@ export default function ProfilePage() {
                         className="flex-1 bg-transparent border-none outline-none text-fg text-sm py-2.5 font-[inherit] placeholder:text-muted" />
                     </div>
                     <div className="flex items-center bg-card border border-line rounded-full px-3 gap-2 col-span-2">
-                      <input type="tel" placeholder="Phone number (+65...)" value={c.phone}
+                      <input type="tel" placeholder="+6591234567" value={c.phone}
                         onChange={e => setContact(i, "phone", e.target.value)}
                         className="flex-1 bg-transparent border-none outline-none text-fg text-sm py-2.5 font-[inherit] placeholder:text-muted" />
                     </div>

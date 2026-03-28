@@ -5,6 +5,7 @@ import IncidentReportForm from "../components/emergency/IncidentReportForm.jsx";
 import PhotoUpload from "../components/emergency/PhotoUpload.jsx";
 import { useEmergency } from "../hooks/useEmergency.js";
 import { useGeolocation } from "../hooks/useGeolocation.js";
+import { useProfile } from "../hooks/useProfile.js";
 import { useNavigate } from "react-router-dom";
 
 const MAPS_URL = import.meta.env.VITE_MAPS_WRAPPER_URL ?? "http://localhost:8007";
@@ -18,12 +19,12 @@ export default function EmergencyReportPage() {
   const [photoUrl,        setPhotoUrl]        = useState(null);
   const [resolvedAddress, setResolvedAddress] = useState(null);
 
-  // ── Read pre-fill data from localStorage ──────────────────────────────────
-  const profile      = (() => { try { return JSON.parse(localStorage.getItem("tg_profile")) ?? {}; } catch { return {}; } })();
+  // ── Read pre-fill data ────────────────────────────────────────────────────
+  const { profile } = useProfile();
   const upcomingHike = (() => { try { return JSON.parse(localStorage.getItem("upcomingHike")) ?? {}; } catch { return {}; } })();
 
-  const prefillUserId  = profile.userId   ?? null;
-  const prefillPhone   = profile.phone    ?? "";
+  const prefillUserId  = profile.userId ?? null;
+  const prefillPhone   = profile.phone  ?? "";
   const prefillTrailId = upcomingHike.selectedTrailId ?? null;
   const prefillTrailName = upcomingHike.startLocation && upcomingHike.endLocation
     ? `${upcomingHike.startLocation} → ${upcomingHike.endLocation}`
@@ -39,8 +40,11 @@ export default function EmergencyReportPage() {
   }, [coords?.lat, coords?.lng]);
 
   async function handleSubmit(data) {
-    const result = await submitReport({ ...data, severity, photoUrl });
-    if (result) navigate("/emergency/confirm", { state: { result } });
+    const localContacts = (profile.emergencyContacts ?? [])
+      .filter(c => c.name && c.phone)
+      .map(c => ({ name: c.name, phone: c.phone, relation: c.relation ?? "" }));
+    const result = await submitReport({ ...data, severity, photoUrl, localEmergencyContacts: localContacts });
+    if (result) navigate("/emergency/confirm", { state: { result, notifiedContacts: localContacts } });
   }
 
   return (

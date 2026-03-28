@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import Navbar from "../components/shared/Navbar.jsx";
 import UpcomingHikeMap from "../components/map/UpcomingHikeMap.jsx";
 import { useAuth } from "../hooks/useAuth.js";
+import { useProfile } from "../hooks/useProfile.js";
 
 // ── WMO code → icon + label (Open-Meteo fallback) ────────────────────────
 function wmoInfo(code) {
@@ -33,7 +34,80 @@ function googleConditionInfo(type = "") {
   return { icon: "🌤", label: type.replace(/_/g, " ") };
 }
 
-const GMAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+const GMAPS_KEY    = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+const INCIDENT_URL = import.meta.env.VITE_INCIDENT_URL ?? "http://localhost:8008";
+
+const SEVERITY_LABELS = { 1: "Minor", 2: "Moderate", 3: "Serious", 4: "Critical", 5: "Fatal" };
+const SEVERITY_COLOR  = (s) => s >= 4 ? "text-red bg-red/10 border-red/20" : s >= 3 ? "text-amber bg-amber/10 border-amber/20" : "text-primary bg-primary/10 border-primary/20";
+
+function IncidentHistory({ userId }) {
+  const [incidents, setIncidents] = useState([]);
+  const [status,    setStatus]    = useState("loading"); // loading | ok | error | no-user
+
+  useEffect(() => {
+    if (!userId) { setStatus("no-user"); return; }
+    fetch(`${INCIDENT_URL}/incidents/user/${userId}`)
+      .then(r => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+        return r.json();
+      })
+      .then(data => { setIncidents(data.incidents ?? []); setStatus("ok"); })
+      .catch(err => { console.error("[IncidentHistory]", err); setStatus("error"); });
+  }, [userId]);
+
+  return (
+    <div className="mt-8">
+      <p className="text-xs text-muted uppercase tracking-widest mb-3">My Incidents</p>
+
+      {status === "loading" && (
+        <div className="flex items-center gap-2 text-xs text-muted px-1">
+          <div className="w-3 h-3 border border-muted border-t-transparent rounded-full animate-spin" />
+          Loading incidents…
+        </div>
+      )}
+
+      {status === "error" && (
+        <p className="text-xs text-muted px-1">Could not load incidents — service may be offline.</p>
+      )}
+
+      {(status === "no-user" || (status === "ok" && incidents.length === 0)) && (
+        <div className="bg-white/[0.03] border border-white/5 border-dashed rounded-2xl px-4 py-5 text-center">
+          <p className="text-sm text-muted">No incidents reported yet</p>
+        </div>
+      )}
+
+      {status === "ok" && incidents.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {incidents.map((inc) => (
+            <div key={inc.incidentId} className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <p className="text-sm font-semibold text-fg">{inc.injuryType}</p>
+                    {inc.severity && (
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_COLOR(inc.severity)}`}>
+                        {SEVERITY_LABELS[inc.severity] ?? `Severity ${inc.severity}`}
+                      </span>
+                    )}
+                  </div>
+                  {inc.description && (
+                    <p className="text-xs text-muted truncate mb-1">{inc.description}</p>
+                  )}
+                  <p className="text-xs text-muted font-mono">
+                    Trail #{inc.trailId} · {inc.reportedAt ? new Date(inc.reportedAt).toLocaleString("en-SG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                  </p>
+                </div>
+                <div className="shrink-0 mt-0.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red block" title="Incident" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 async function resolveCoords(hike) {
   if (hike.startLat && hike.startLng) return { lat: hike.startLat, lng: hike.startLng };
@@ -208,6 +282,7 @@ function formatDate(dateStr, timeStr) {
 
 export default function DashboardPage() {
   const { currentUser } = useAuth();
+  const { profile } = useProfile();
   const navigate = useNavigate();
   const firstName = currentUser?.displayName?.split(" ")[0];
 
@@ -321,6 +396,9 @@ export default function DashboardPage() {
             </Link>
           ))}
         </div>
+
+        {/* ── MY INCIDENTS ── */}
+        <IncidentHistory userId={profile.userId} />
 
         {/* ── RECOMMENDED TRAILS ── */}
         <div className="mt-8">

@@ -85,6 +85,7 @@ class IncidentCreate(BaseModel):
     description: str
     severity:    int   = Field(..., ge=1, le=5)
     photoUrl:    str   = ""
+    hikerPhone:  str   = ""
     lat:         float
     lng:         float
 
@@ -117,6 +118,7 @@ async def create_incident(body: IncidentCreate):
         "description": body.description,
         "severity":    body.severity,
         "photoUrl":    body.photoUrl,
+        "hikerPhone":  body.hikerPhone,
         "location":    GeoPoint(body.lat, body.lng),
         "reportedAt":  firestore.SERVER_TIMESTAMP,
     })
@@ -133,6 +135,21 @@ async def get_incidents_by_trail(trail_id: int):
         .stream()
     )
     incidents = [_serialise(doc.to_dict()) for doc in docs]
+    return {"incidents": incidents, "success": True}
+
+
+@app.get("/incidents/user/{user_id}", tags=["Incidents"])
+async def get_incidents_by_user(user_id: int):
+    docs = (
+        get_db().collection("incidents")
+        .where("userId", "==", user_id)
+        .stream()
+    )
+    incidents = sorted(
+        [_serialise(doc.to_dict()) for doc in docs],
+        key=lambda x: x.get("reportedAt") or "",
+        reverse=True,
+    )
     return {"incidents": incidents, "success": True}
 
 

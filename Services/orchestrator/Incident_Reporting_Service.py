@@ -52,6 +52,11 @@ TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
+class ContactEntry(BaseModel):
+    name:  str
+    phone: str
+
+
 class IncidentRequest(BaseModel):
     userId:      int   = Field(..., example=1)
     hikerPhone:  str   = Field(..., example="+6583355100")
@@ -62,6 +67,8 @@ class IncidentRequest(BaseModel):
     lat:         float = Field(..., example=1.3521)
     lng:         float = Field(..., example=103.8198)
     photoUrl:    str | None = None
+    # Local profile contacts — used as fallback if OutSystems returns none
+    localEmergencyContacts: list[ContactEntry] = Field(default_factory=list)
 
 
 # ── HTTP Helpers ──────────────────────────────────────────────────────────────
@@ -184,12 +191,22 @@ async def report_incident(req: IncidentRequest):
                 log.warning("Nearby Users Service unavailable for trailId=%s", req.trailId)
                 return []
 
-        emergency_contacts, nearby_users = await asyncio.gather(
+        outsystems_contacts, nearby_users = await asyncio.gather(
             _fetch_emergency_contacts(),
             _fetch_nearby_users(),
         )
-        log.info("Steps 3 & 5 ✓ emergencyContacts=%d nearbyUsers=%d",
-                 len(emergency_contacts), len(nearby_users))
+
+        # Always include locally-stored contacts from the user's profile.
+        # Merge with OutSystems contacts, deduplicating by phone number.
+        emergency_contacts = list(outsystems_contacts)
+        existing_phones = {c["phone"] for c in emergency_contacts if c.get("phone")}
+        for c in req.localEmergencyContacts:
+            if c.phone and c.phone not in existing_phones:
+                emergency_contacts.append({"name": c.name, "phone": c.phone})
+                existing_phones.add(c.phone)
+        log.info("Steps 3 & 5 ✓ emergencyContacts=%d (outsystems=%d local=%d) nearbyUsers=%d",
+                 len(emergency_contacts), len(outsystems_contacts),
+                 len(req.localEmergencyContacts), len(nearby_users))
 
         # ── Step 4: Notify emergency contacts ─────────────────────────────────
         log.info("Step 4 – Notifying %d emergency contact(s)", len(emergency_contacts))
@@ -243,6 +260,7 @@ async def report_incident(req: IncidentRequest):
             "lat":         req.lat,
             "lng":         req.lng,
             "photoUrl":    req.photoUrl or "",
+            "hikerPhone":  req.hikerPhone,
         }
         try:
             incident_result = await _post(
@@ -273,15 +291,21 @@ async def report_incident(req: IncidentRequest):
         log.info("Step 8 ✓ confirmation sent to %s", req.hikerPhone)
 
     # ── Build and return response ─────────────────────────────────────────────
+    sms_delivered = any(
+        d.get("twilioStatus") not in ("failed", None)
+        for d in contact_delivery + nearby_delivery
+    )
     response = {
         "status":                "reported",
         "incidentId":            incident_id,
         "userId":                req.userId,
         "trailId":               req.trailId,
+        "injuryType":            req.injuryType,
         "severity":              req.severity,
         "resolvedAddress":       address,
         "emergencyContactsNotified": len(emergency_contacts),
         "nearbyHikersNotified":  len(nearby_users),
+        "smsDelivered":          sms_delivered,
         "contactDeliveryStatus": contact_delivery,
         "nearbyDeliveryStatus":  nearby_delivery,
         "timeCreated":           datetime.utcnow().isoformat() + "Z",
@@ -294,6 +318,14 @@ async def report_incident(req: IncidentRequest):
     log.info("◀ Incident reported | incidentId=%s contacts=%d nearby=%d",
              incident_id, len(emergency_contacts), len(nearby_users))
     return response
+
+
+# ── Incident lookup endpoints (proxy to Trail Incident Service) ───────────────
+
+@app.get("/incidents/user/{user_id}", tags=["Incident"])
+async def get_user_incidents(user_id: int):
+    async with httpx.AsyncClient() as client:
+        return await _get(client, f"{TRAIL_INCIDENT_URL}/incidents/user/{user_id}")
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
