@@ -91,12 +91,19 @@ export default function ProfilePage() {
       let userId = existingUserId;
 
       if (existingUserId) {
-        // Update existing profile
-        await fetch(`${ORCHESTRATOR_URL}/hiker-profile/${existingUserId}`, {
+        // Update existing profile — response may contain a new OutSystems userId
+        const res = await fetch(`${ORCHESTRATOR_URL}/hiker-profile/${existingUserId}`, {
           method:  "PUT",
           headers: { "Content-Type": "application/json" },
           body:    JSON.stringify(apiPayload),
         });
+        if (res.ok) {
+          const data = await res.json();
+          // OutSystems assigned a canonical integer userId — adopt it
+          if (data.userId && data.userId !== existingUserId) {
+            userId = data.userId;
+          }
+        }
       } else {
         // Create new profile
         const res = await fetch(`${ORCHESTRATOR_URL}/hiker-profile`, {
