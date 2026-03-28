@@ -22,12 +22,14 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - PORT=8000
       - HIKER_PROFILE_URL=http://hiker-profile:8001
       - TRAIL_CONDITION_URL=http://trail-condition:8002
       - INCIDENT_RISK_URL=http://incident-risk:8003
       - HIKE_COMPLETION_URL=http://hike-completion:8004
       - WEATHER_WRAPPER_URL=http://weather-wrapper:8005
       - EVALUATOR_WRAPPER_URL=http://evaluator-wrapper:8006
+      - GOOGLEMAPS_URL=http://googlemaps-wrapper:8007
     env_file:
       - ./Services/.env
     depends_on:
@@ -173,13 +175,19 @@ services:
       - "8008:8008"
     environment:
       - PORT=8008
-      - HIKER_PROFILE_URL=http://hiker-profile:8001
+      - GOOGLEMAPS_URL=http://googlemaps-wrapper:8007
+      - EMERGENCY_CONTACTS_URL=http://emergency-contacts:5003
       - NOTIFICATION_URL=http://notification-wrapper:5050
+      - NEARBY_USERS_URL=http://nearby-users:5005
+      - TRAIL_INCIDENT_URL=http://incident-service:5004
     env_file:
       - ./Services/.env
     depends_on:
       - notification-wrapper
-      - hiker-profile
+      - googlemaps-wrapper
+      - emergency-contacts
+      - nearby-users
+      - incident-service
     networks:
       - trailguard
     restart: unless-stopped
@@ -190,7 +198,7 @@ services:
       context: ./Services/atomic
       dockerfile: Dockerfile
       args:
-        SERVICE: Incident_Service
+        SERVICE: Trail_Incident
     ports:
       - "5004:5004"
     environment:
@@ -212,6 +220,23 @@ services:
       - "5003:5003"
     environment:
       - PORT=5003
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+    restart: unless-stopped
+
+  # ─── Nearby Users Service ────────────────────────────────────
+  nearby-users:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Nearby_Users_Service
+    ports:
+      - "5005:5005"
+    environment:
+      - PORT=5005
     env_file:
       - ./Services/.env
     networks:
