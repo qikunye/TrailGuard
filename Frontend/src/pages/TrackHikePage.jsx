@@ -302,8 +302,9 @@ export default function TrackHikePage() {
       setElapsed(secsElapsed);
       setStartedAt(saved.startedAt);
       setStatus("tracking");
-      if (saved.hikeId)  setHikeId(saved.hikeId);
-      if (saved.hikeCtx) setHikeCtx(saved.hikeCtx);
+      if (saved.hikeId)       setHikeId(saved.hikeId);
+      if (saved.hikeCtx)      setHikeCtx(saved.hikeCtx);
+      if (saved.selectedHike) setSelectedHike(saved.selectedHike);
     }
   }, [activeTrackKey]);
 
@@ -323,10 +324,11 @@ export default function TrackHikePage() {
         startedAt,
         hikeId,
         hikeCtx,
+        selectedHike,
         path: trackedPath,
       }));
     }
-  }, [trackedPath, status, startedAt, hikeId, hikeCtx, activeTrackKey]);
+  }, [trackedPath, status, startedAt, hikeId, hikeCtx, selectedHike, activeTrackKey]);
 
   const startTracking = useCallback(async () => {
     if (!navigator.geolocation) {
@@ -441,10 +443,19 @@ export default function TrackHikePage() {
     if (hikeHistoryKey) localStorage.setItem(hikeHistoryKey, JSON.stringify(updated));
     if (activeTrackKey) localStorage.removeItem(activeTrackKey);
     if (upcomingKey)    localStorage.removeItem(upcomingKey);
+
+    // Remove the completed hike from the registered hikes list so it can't be selected again
+    if (registeredKey && selectedHike) {
+      const remaining = registeredHikes.filter(h => h.registeredAt !== selectedHike.registeredAt);
+      localStorage.setItem(registeredKey, JSON.stringify(remaining));
+      setRegisteredHikes(remaining);
+    }
+
     setHistory(updated);
     setHikeId(null);
+    setSelectedHike(null);
     setStatus("done");
-  }, [history, selectedHike, hikeHistoryKey, activeTrackKey, upcomingKey]);
+  }, [history, selectedHike, registeredHikes, hikeHistoryKey, activeTrackKey, upcomingKey, registeredKey]);
 
   const resetTracking = useCallback(() => {
     setStatus("idle");
@@ -516,6 +527,25 @@ export default function TrackHikePage() {
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── ACTIVE HIKE INFO CARD ── */}
+        {status === "tracking" && selectedHike && (
+          <div className="bg-primary/10 border border-primary/20 rounded-2xl px-4 py-3.5 mb-4 flex items-center gap-3">
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-fg truncate">
+                {selectedHike.startLocation} → {selectedHike.endLocation}
+              </p>
+              <p className="text-xs text-muted mt-0.5">
+                Trail #{selectedHike.selectedTrailId}
+                {selectedHike.distanceText && ` · ${selectedHike.distanceText}`}
+              </p>
+            </div>
           </div>
         )}
 

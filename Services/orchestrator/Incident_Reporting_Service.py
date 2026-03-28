@@ -334,6 +334,23 @@ async def get_trail_incidents(trail_id: int):
         return await _get(client, f"{TRAIL_INCIDENT_URL}/incidents/trail/{trail_id}")
 
 
+@app.get("/incidents/trail/{trail_id}/active", tags=["Incident"])
+async def get_active_trail_incidents(trail_id: int):
+    """Return only incidents filed by hikers who are still actively hiking (isHiking=True)."""
+    async with httpx.AsyncClient() as client:
+        incidents_data, nearby_data = await asyncio.gather(
+            _get(client, f"{TRAIL_INCIDENT_URL}/incidents/trail/{trail_id}"),
+            _get(client, f"{NEARBY_USERS_URL}/getNearby/{trail_id}"),
+        )
+
+    active_ids = set(nearby_data.get("nearbyUserIds", []))
+    active_incidents = [
+        inc for inc in (incidents_data.get("incidents") or [])
+        if inc.get("userId") in active_ids
+    ]
+    return {"incidents": active_incidents, "success": True}
+
+
 # ── Health check ──────────────────────────────────────────────────────────────
 
 @app.get("/health", tags=["Ops"])
