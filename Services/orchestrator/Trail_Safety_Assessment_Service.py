@@ -72,6 +72,12 @@ HIKE_COMPLETION_URL   = os.getenv("HIKE_COMPLETION_URL",   "http://localhost:800
 WEATHER_WRAPPER_URL   = os.getenv("WEATHER_WRAPPER_URL",   "http://localhost:8005")
 EVALUATOR_WRAPPER_URL = os.getenv("EVALUATOR_WRAPPER_URL", "http://localhost:8006")
 
+# OutSystems HikerProfileAPI — source of truth for userId
+OUTSYSTEMS_HIKER_URL  = os.getenv(
+    "OUTSYSTEMS_HIKER_URL",
+    "https://personal-eisumi2z.outsystemscloud.com/HikerProfileService/rest/HikerProfileAPI",
+)
+
 TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
 
@@ -330,30 +336,116 @@ async def assess_trail(req: AssessmentRequest):
 @app.post("/hiker-profile", tags=["Profile"])
 async def create_hiker_profile(body: dict):
     """
-    Proxy: POST /AddUser on HikerProfile atomic service.
-    Accepts: name, fitnessLevel, age, bio, totalHikesCompleted
-    Returns: userId, Success, ErrorCode, ErrorMessage
+    Dual-write: POST /AddUser to OutSystems (source of truth) then mirror to local mock.
+    OutSystems returns the canonical userId; the same userId is stored in the local mock
+    so both systems stay in sync and container restarts don't orphan the profile.
     """
     async with httpx.AsyncClient() as client:
-        return await _post(client, f"{HIKER_PROFILE_URL}/AddUser", payload=body)
+
+        # ── 1. Write to OutSystems (primary) ─────────────────────────────────
+        # OutSystems requires Title-cased fitnessLevel: "Low" | "Medium" | "High"
+        os_body = dict(body)
+        if os_body.get("fitnessLevel"):
+            os_body["fitnessLevel"] = os_body["fitnessLevel"].capitalize()
+
+        outsystems_userId = None
+        try:
+            os_resp = await client.post(
+                f"{OUTSYSTEMS_HIKER_URL}/AddUser",
+                json=os_body,
+                timeout=TIMEOUT,
+            )
+            if os_resp.is_success:
+                os_data = os_resp.json()
+                if os_data.get("Success") and os_data.get("userId") is not None:
+                    outsystems_userId = str(os_data["userId"])   # OS returns an integer
+                    log.info("OutSystems AddUser ✓ userId=%s", outsystems_userId)
+                else:
+                    log.warning("OutSystems AddUser error: %s", os_data)
+            else:
+                log.warning("OutSystems AddUser returned %s: %s", os_resp.status_code, os_resp.text)
+        except Exception as e:
+            log.warning("OutSystems AddUser unreachable: %s", e)
+
+        # ── 2. Mirror to local mock using OutSystems' userId as canonical ID ──
+        local_body = dict(body)
+        if outsystems_userId:
+            local_body["userId"] = outsystems_userId
+
+        local_result = await _post(client, f"{HIKER_PROFILE_URL}/AddUser", payload=local_body)
+
+        # Return with OutSystems' userId if available, otherwise local ID
+        if outsystems_userId:
+            return {"userId": outsystems_userId, "Success": True, "ErrorCode": 0, "ErrorMessage": ""}
+        return local_result
 
 
 @app.put("/hiker-profile/{user_id}", tags=["Profile"])
 async def update_hiker_profile(user_id: str, body: dict):
     """
-    Proxy: PUT /Update/{userId} on HikerProfile atomic service.
-    Accepts: name, fitnessLevel, age, bio, totalHikesCompleted (all optional)
+    Dual-write: PUT /Update/{userId} to OutSystems then to local mock.
+    If the user doesn't exist in OutSystems yet (e.g. usr_xxx legacy ID),
+    falls back to AddUser and returns the new OutSystems userId so the
+    frontend can update localStorage with the canonical integer ID.
     """
     async with httpx.AsyncClient() as client:
+
+        # OutSystems requires Title-cased fitnessLevel
+        os_body = dict(body)
+        if os_body.get("fitnessLevel"):
+            os_body["fitnessLevel"] = os_body["fitnessLevel"].capitalize()
+
+        new_os_user_id = None
+
+        # ── 1. Try OutSystems Update ──────────────────────────────────────────
+        os_updated = False
         try:
-            resp = await client.put(
-                f"{HIKER_PROFILE_URL}/Update/{user_id}",
-                json=body, timeout=TIMEOUT,
+            os_resp = await client.put(
+                f"{OUTSYSTEMS_HIKER_URL}/Update/{user_id}",
+                json=os_body, timeout=TIMEOUT,
             )
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.RequestError as e:
-            raise HTTPException(status_code=503, detail=f"Cannot reach HikerProfile service: {e}")
+            if os_resp.is_success:
+                os_data = os_resp.json()
+                if os_data.get("Success"):
+                    os_updated = True
+                    log.info("OutSystems Update ✓ userId=%s", user_id)
+                else:
+                    log.warning("OutSystems Update non-success for userId=%s: %s", user_id, os_data)
+            else:
+                log.warning("OutSystems Update HTTP %s for userId=%s", os_resp.status_code, user_id)
+        except Exception as e:
+            log.warning("OutSystems Update unreachable: %s", e)
+
+        # ── 2. If Update failed, user isn't in OS yet — call AddUser ─────────
+        if not os_updated:
+            try:
+                add_resp = await client.post(
+                    f"{OUTSYSTEMS_HIKER_URL}/AddUser",
+                    json=os_body, timeout=TIMEOUT,
+                )
+                if add_resp.is_success:
+                    add_data = add_resp.json()
+                    if add_data.get("Success") and add_data.get("userId") is not None:
+                        new_os_user_id = str(add_data["userId"])
+                        log.info("OutSystems AddUser fallback ✓ new userId=%s (was %s)", new_os_user_id, user_id)
+            except Exception as e:
+                log.warning("OutSystems AddUser fallback failed: %s", e)
+
+        # ── 3. Update local mock under the existing userId ────────────────────
+        try:
+            await client.put(f"{HIKER_PROFILE_URL}/Update/{user_id}", json=body, timeout=TIMEOUT)
+        except Exception:
+            pass
+
+        # ── 4. If OS gave us a new integer userId, seed local mock under it ───
+        if new_os_user_id:
+            local_body = dict(body)
+            local_body["userId"] = new_os_user_id
+            await _post(client, f"{HIKER_PROFILE_URL}/AddUser", payload=local_body)
+            # Return new userId so frontend can update localStorage
+            return {"userId": new_os_user_id, "Success": True, "ErrorCode": 0, "ErrorMessage": ""}
+
+        return {"Success": True, "ErrorCode": 0, "ErrorMessage": ""}
 
 
 @app.get("/hiker-profile/{user_id}", tags=["Profile"])
