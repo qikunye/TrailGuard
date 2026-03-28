@@ -141,6 +141,77 @@ services:
     networks:
       - trailguard
 
+  # ─── Notification Wrapper (Twilio SMS) ──────────────────────
+  notification-wrapper:
+    build:
+      context: ./Services
+      dockerfile: Dockerfile.notification
+    ports:
+      - "5050:5050"
+    environment:
+      - PORT=5050
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+    restart: unless-stopped
+
+  # ─── Incident Reporting Service ─────────────────────────────
+  incident-reporting:
+    build:
+      context: ./Services
+      dockerfile: orchestrator/Dockerfile
+    command: uvicorn Incident_Reporting_Service:app --host 0.0.0.0 --port 8008
+    ports:
+      - "8008:8008"
+    environment:
+      - PORT=8008
+      - HIKER_PROFILE_URL=http://hiker-profile:8001
+      - NOTIFICATION_URL=http://notification-wrapper:5050
+    env_file:
+      - ./Services/.env
+    depends_on:
+      - notification-wrapper
+      - hiker-profile
+    networks:
+      - trailguard
+    restart: unless-stopped
+
+  # ─── Incident Service (Firestore) ───────────────────────────
+  incident-service:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Incident_Service
+    ports:
+      - "5004:5004"
+    environment:
+      - PORT=5004
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+    restart: unless-stopped
+
+  # ─── Emergency Contacts ─────────────────────────────────────
+  emergency-contacts:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Emergency_Contacts_Service
+    ports:
+      - "5003:5003"
+    environment:
+      - PORT=5003
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+    restart: unless-stopped
+
+
 networks:
   trailguard:
     driver: bridge
