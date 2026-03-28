@@ -11,6 +11,9 @@ services:
       - ./Frontend/.env
     depends_on:
       - orchestrator
+      - incident-reporting
+      - completed-user-hike
+      - googlemaps-wrapper
     networks:
       - trailguard
 
