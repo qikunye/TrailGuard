@@ -62,8 +62,17 @@ export default function LoginPage() {
   const { currentUser, signInWithGoogle, signInWithEmail, registerWithEmail } = useAuth();
   const navigate = useNavigate();
 
+  // After auth resolves, route new users to profile setup, existing users to dashboard
   useEffect(() => {
-    if (currentUser) navigate("/dashboard", { replace: true });
+    if (!currentUser) return;
+    const stored = (() => {
+      try { return JSON.parse(localStorage.getItem(`tg_profile_${currentUser.uid}`)) ?? {}; } catch { return {}; }
+    })();
+    if (stored.userId && Number(stored.userId) > 0) {
+      navigate("/dashboard", { replace: true });
+    } else {
+      navigate("/profile", { replace: true });
+    }
   }, [currentUser, navigate]);
 
   const showToast = (msg, type = "loading") => setToast({ msg, type });

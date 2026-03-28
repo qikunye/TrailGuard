@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import Navbar from "../components/shared/Navbar.jsx";
 import HikeRouteMap from "../components/map/HikeRouteMap.jsx";
 import { useAssessment, deriveExpLevel } from "../hooks/useAssessment.js";
+import { useProfile } from "../hooks/useProfile.js";
 
 const ORCHESTRATOR_URL =
   import.meta.env.VITE_ORCHESTRATOR_URL ||
@@ -294,15 +295,11 @@ export default function TrailRegistrationPage() {
     startLat: null, startLng: null, endLat: null, endLng: null, path: null,
   });
 
-  // ── Read profile from localStorage ────────────────────────────────────────
-  const [hikerProfile, setHikerProfile] = useState({});
-  useEffect(() => {
-    const stored = localStorage.getItem("tg_profile");
-    if (stored) { try { setHikerProfile(JSON.parse(stored)); } catch (_) {} }
-  }, []);
+  // ── Read profile (scoped to current Firebase user) ────────────────────────
+  const { profile: hikerProfile } = useProfile();
 
-  const userId        = hikerProfile.userId       || "usr_001";    // fallback to demo user
-  const declaredExp   = deriveExpLevel(Number(hikerProfile.totalHikesCompleted) || 0);
+  const userId      = hikerProfile.userId || "usr_001";
+  const declaredExp = deriveExpLevel(Number(hikerProfile.totalHikesCompleted) || 0);
   const selectedTrail = trails.find(t => t.trailId === form.selectedTrailId);
 
   function handleRouteReady({ startName, endName, distanceText, durationText, durationSeconds, startLat, startLng, endLat, endLng, path }) {
