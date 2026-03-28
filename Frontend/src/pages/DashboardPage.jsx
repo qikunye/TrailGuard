@@ -45,14 +45,19 @@ const SEVERITY_COLOR  = (s) => s >= 4 ? "text-red bg-red/10 border-red/20" : s >
 function TrailIncidents({ trailId }) {
   const [incidents, setIncidents] = useState([]);
   const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState(null);
 
   useEffect(() => {
     if (!trailId) return;
     setLoading(true);
-    fetch(`${INCIDENT_URL}/incidents/trail/${trailId}`)
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(data => setIncidents(data.incidents ?? []))
-      .catch(() => setIncidents([]))
+    setError(null);
+    fetch(`${INCIDENT_URL}/incidents/trail/${trailId}/active`)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(data => { setIncidents(data.incidents ?? []); })
+      .catch(err => { console.error("[TrailIncidents]", err); setError(err.message); })
       .finally(() => setLoading(false));
   }, [trailId]);
 
@@ -61,6 +66,12 @@ function TrailIncidents({ trailId }) {
     <div className="mt-8 flex items-center gap-2 text-xs text-muted px-1">
       <div className="w-3 h-3 border border-muted border-t-transparent rounded-full animate-spin" />
       Loading trail incidents…
+    </div>
+  );
+  if (error) return (
+    <div className="mt-8">
+      <p className="text-xs text-muted uppercase tracking-widest mb-2">Active Hike Incidents on This Trail</p>
+      <p className="text-xs text-muted px-1">Could not load — {error}</p>
     </div>
   );
   if (incidents.length === 0) return null;

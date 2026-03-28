@@ -131,10 +131,13 @@ async def get_incidents_by_trail(trail_id: int):
     docs = (
         get_db().collection("incidents")
         .where("trailId", "==", trail_id)
-        .order_by("reportedAt", direction=firestore.Query.DESCENDING)
         .stream()
     )
-    incidents = [_serialise(doc.to_dict()) for doc in docs]
+    incidents = sorted(
+        [_serialise(doc.to_dict()) for doc in docs],
+        key=lambda x: x.get("reportedAt") or "",
+        reverse=True,
+    )
     return {"incidents": incidents, "success": True}
 
 
