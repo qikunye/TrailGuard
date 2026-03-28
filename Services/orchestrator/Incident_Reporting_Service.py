@@ -235,14 +235,14 @@ async def report_incident(req: IncidentRequest):
         # ── Step 7: Persist incident in Firestore via Trail Incident Service ───
         log.info("Step 7 – Persisting incident to Trail Incident Service")
         incident_record = {
-            "trail_id":    req.trailId,
+            "trailId":     req.trailId,
             "userId":      req.userId,
             "injuryType":  req.injuryType,
             "description": req.description,
             "severity":    req.severity,
             "lat":         req.lat,
             "lng":         req.lng,
-            "photo":       req.photoUrl or "",
+            "photoUrl":    req.photoUrl or "",
         }
         try:
             incident_result = await _post(

@@ -1,10 +1,17 @@
 import { Link } from "react-router-dom";
 
-export default function EmergencyStatusCard({ eta = "15–20 minutes", contacts = [] }) {
+export default function EmergencyStatusCard({ result }) {
+  const incidentId              = result?.incidentId ?? "—";
+  const resolvedAddress         = result?.resolvedAddress ?? "—";
+  const emergencyContactsCount  = result?.emergencyContactsNotified ?? 0;
+  const nearbyHikersCount       = result?.nearbyHikersNotified ?? 0;
+  const timeCreated             = result?.timeCreated
+    ? new Date(result.timeCreated).toLocaleTimeString()
+    : "—";
+
   const notified = [
-    { icon: "🚑", label: "Singapore Civil Defence Force (SCDF)" },
-    { icon: "🏥", label: "Nearest Emergency Facility" },
-    ...contacts.map(c => ({ icon: "👤", label: c })),
+    { icon: "👤", label: `Emergency Contact${emergencyContactsCount !== 1 ? "s" : ""}`, count: emergencyContactsCount },
+    { icon: "🥾", label: "Nearby Hikers on Trail",                                       count: nearbyHikersCount },
   ];
 
   return (
@@ -12,14 +19,26 @@ export default function EmergencyStatusCard({ eta = "15–20 minutes", contacts 
       <div className="text-center mb-6">
         <div className="text-5xl mb-2">🚁</div>
         <h2 className="text-xl font-bold text-green">Emergency Alert Sent</h2>
-        <p className="text-sm text-muted mt-1">Emergency services and your contacts have been notified</p>
+        <p className="text-sm text-muted mt-1">Your emergency contacts and nearby hikers have been notified</p>
       </div>
 
-      <div className="bg-green-bg border border-green-line rounded-xl p-4 mb-5 text-center">
-        <div className="text-xs text-muted uppercase tracking-wider mb-1">Estimated Response Time</div>
-        <div className="text-2xl font-bold text-green">{eta}</div>
+      {/* Incident meta */}
+      <div className="bg-surface border border-line rounded-xl p-4 mb-5 flex flex-col gap-2 text-sm">
+        <div className="flex justify-between">
+          <span className="text-muted">Incident ID</span>
+          <span className="text-fg font-mono">{incidentId}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted">Location</span>
+          <span className="text-fg">{resolvedAddress}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted">Reported At</span>
+          <span className="text-fg">{timeCreated}</span>
+        </div>
       </div>
 
+      {/* Notified counts */}
       <div className="mb-5">
         <h3 className="text-[0.8rem] font-semibold text-muted uppercase tracking-wider mb-2">Notified</h3>
         <div className="flex flex-col gap-1.5">
@@ -27,7 +46,7 @@ export default function EmergencyStatusCard({ eta = "15–20 minutes", contacts 
             <div key={item.label} className="flex items-center gap-3 px-3 py-2.5 bg-surface rounded-lg">
               <span>{item.icon}</span>
               <span className="text-sm text-fg flex-1">{item.label}</span>
-              <span className="text-xs text-green">✓ Notified</span>
+              <span className="text-xs text-green font-semibold">{item.count} notified</span>
             </div>
           ))}
         </div>
