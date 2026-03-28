@@ -82,6 +82,9 @@ class AddUserRequest(BaseModel):
     # totalHikesCompleted is NOT in the formal Swagger spec for AddUser,
     # but we accept it here so the profile page can seed the hike counter.
     totalHikesCompleted: Optional[int] = 0
+    # userId may be supplied by the orchestrator (mirrored from OutSystems)
+    # so both systems share the same canonical ID.
+    userId:              Optional[str] = None
 
 
 class UpdateUserRequest(BaseModel):
@@ -98,7 +101,7 @@ class UpdateUserRequest(BaseModel):
 # ── Swagger-aligned: POST /AddUser ───────────────────────────────────────────
 @app.post("/AddUser", tags=["HikerProfileAPI"])
 async def add_user(body: AddUserRequest):
-    user_id = f"usr_{_uuid.uuid4().hex[:8]}"
+    user_id = body.userId or f"usr_{_uuid.uuid4().hex[:8]}"
     hikes   = body.totalHikesCompleted or 0
     HIKER_DB[user_id] = {
         "userId":          user_id,
