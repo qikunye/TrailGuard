@@ -20,8 +20,12 @@ export default function EmergencyReportPage() {
   const [resolvedAddress, setResolvedAddress] = useState(null);
 
   // ── Read pre-fill data ────────────────────────────────────────────────────
-  const { profile } = useProfile();
-  const upcomingHike = (() => { try { return JSON.parse(localStorage.getItem("upcomingHike")) ?? {}; } catch { return {}; } })();
+  const { profile, uid } = useProfile();
+  const upcomingKey  = uid ? `upcomingHike_${uid}` : null;
+  const upcomingHike = (() => {
+    if (!upcomingKey) return {};
+    try { return JSON.parse(localStorage.getItem(upcomingKey)) ?? {}; } catch { return {}; }
+  })();
 
   const prefillUserId  = profile.userId ?? null;
   const prefillPhone   = profile.phone  ?? "";
@@ -44,7 +48,9 @@ export default function EmergencyReportPage() {
       .filter(c => c.name && c.phone)
       .map(c => ({ name: c.name, phone: c.phone, relation: c.relation ?? "" }));
     const result = await submitReport({ ...data, severity, photoUrl, localEmergencyContacts: localContacts });
-    if (result) navigate("/emergency/confirm", { state: { result, notifiedContacts: localContacts } });
+    if (result) {
+      navigate("/emergency/confirm", { state: { result, notifiedContacts: localContacts } });
+    }
   }
 
   return (

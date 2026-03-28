@@ -26,5 +26,5 @@ export function useProfile() {
 
   const isSetup = !!(profile.userId && Number(profile.userId) > 0);
 
-  return { profile, saveProfile, profileKey, isSetup };
+  return { profile, saveProfile, profileKey, isSetup, uid };
 }
