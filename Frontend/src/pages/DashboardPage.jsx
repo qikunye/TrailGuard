@@ -4,6 +4,8 @@ import Navbar from "../components/shared/Navbar.jsx";
 import UpcomingHikeMap from "../components/map/UpcomingHikeMap.jsx";
 import { useAuth } from "../hooks/useAuth.js";
 import { useProfile } from "../hooks/useProfile.js";
+import { useAssessment, deriveExpLevel } from "../hooks/useAssessment.js";
+import AssessmentModal from "../components/assessment/AssessmentModal.jsx";
 
 // ── WMO code → icon + label (Open-Meteo fallback) ────────────────────────
 function wmoInfo(code) {
@@ -40,71 +42,59 @@ const INCIDENT_URL = import.meta.env.VITE_INCIDENT_URL ?? "http://localhost:8008
 const SEVERITY_LABELS = { 1: "Minor", 2: "Moderate", 3: "Serious", 4: "Critical", 5: "Fatal" };
 const SEVERITY_COLOR  = (s) => s >= 4 ? "text-red bg-red/10 border-red/20" : s >= 3 ? "text-amber bg-amber/10 border-amber/20" : "text-primary bg-primary/10 border-primary/20";
 
-function IncidentHistory({ userId }) {
+function TrailIncidents({ trailId }) {
   const [incidents, setIncidents] = useState([]);
-  const [status,    setStatus]    = useState("loading"); // loading | ok | error | no-user
+  const [loading,   setLoading]   = useState(false);
 
   useEffect(() => {
-    if (!userId) { setStatus("no-user"); return; }
-    fetch(`${INCIDENT_URL}/incidents/user/${userId}`)
-      .then(r => {
-        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-        return r.json();
-      })
-      .then(data => { setIncidents(data.incidents ?? []); setStatus("ok"); })
-      .catch(err => { console.error("[IncidentHistory]", err); setStatus("error"); });
-  }, [userId]);
+    if (!trailId) return;
+    setLoading(true);
+    fetch(`${INCIDENT_URL}/incidents/trail/${trailId}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => setIncidents(data.incidents ?? []))
+      .catch(() => setIncidents([]))
+      .finally(() => setLoading(false));
+  }, [trailId]);
+
+  if (!trailId) return null;
+  if (loading) return (
+    <div className="mt-8 flex items-center gap-2 text-xs text-muted px-1">
+      <div className="w-3 h-3 border border-muted border-t-transparent rounded-full animate-spin" />
+      Loading trail incidents…
+    </div>
+  );
+  if (incidents.length === 0) return null;
 
   return (
     <div className="mt-8">
-      <p className="text-xs text-muted uppercase tracking-widest mb-3">My Incidents</p>
-
-      {status === "loading" && (
-        <div className="flex items-center gap-2 text-xs text-muted px-1">
-          <div className="w-3 h-3 border border-muted border-t-transparent rounded-full animate-spin" />
-          Loading incidents…
-        </div>
-      )}
-
-      {status === "error" && (
-        <p className="text-xs text-muted px-1">Could not load incidents — service may be offline.</p>
-      )}
-
-      {(status === "no-user" || (status === "ok" && incidents.length === 0)) && (
-        <div className="bg-white/[0.03] border border-white/5 border-dashed rounded-2xl px-4 py-5 text-center">
-          <p className="text-sm text-muted">No incidents reported yet</p>
-        </div>
-      )}
-
-      {status === "ok" && incidents.length > 0 && (
-        <div className="flex flex-col gap-2">
-          {incidents.map((inc) => (
-            <div key={inc.incidentId} className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <p className="text-sm font-semibold text-fg">{inc.injuryType}</p>
-                    {inc.severity && (
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_COLOR(inc.severity)}`}>
-                        {SEVERITY_LABELS[inc.severity] ?? `Severity ${inc.severity}`}
-                      </span>
-                    )}
-                  </div>
-                  {inc.description && (
-                    <p className="text-xs text-muted truncate mb-1">{inc.description}</p>
+      <p className="text-xs text-muted uppercase tracking-widest mb-3">Active Hike Incidents on This Trail</p>
+      <div className="flex flex-col gap-2">
+        {incidents.map((inc) => (
+          <div key={inc.incidentId ?? inc.id} className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <p className="text-sm font-semibold text-fg">{inc.injuryType}</p>
+                  {inc.severity && (
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_COLOR(inc.severity)}`}>
+                      {SEVERITY_LABELS[inc.severity] ?? `Severity ${inc.severity}`}
+                    </span>
                   )}
-                  <p className="text-xs text-muted font-mono">
-                    Trail #{inc.trailId} · {inc.reportedAt ? new Date(inc.reportedAt).toLocaleString("en-SG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                  </p>
                 </div>
-                <div className="shrink-0 mt-0.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-red block" title="Incident" />
-                </div>
+                {inc.description && (
+                  <p className="text-xs text-muted truncate mb-1">{inc.description}</p>
+                )}
+                <p className="text-xs text-muted font-mono">
+                  {inc.reportedAt ? new Date(inc.reportedAt).toLocaleString("en-SG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                </p>
+              </div>
+              <div className="shrink-0 mt-0.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-red block" title="Incident" />
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -286,9 +276,30 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const firstName = currentUser?.displayName?.split(" ")[0];
 
+  const uid = currentUser?.uid ?? null;
+  const upcomingKey = uid ? `upcomingHike_${uid}` : null;
   const upcomingHike = (() => {
-    try { return JSON.parse(localStorage.getItem("upcomingHike")); } catch { return null; }
+    if (!upcomingKey) return null;
+    try { return JSON.parse(localStorage.getItem(upcomingKey)); } catch { return null; }
   })();
+
+  // ── Trail assessment (same flow as Register Hike page) ──────────────────
+  const { assess, loading: checkLoading } = useAssessment();
+  const [assessment, setAssessment] = useState(null);
+  const [showModal,  setShowModal]  = useState(false);
+
+  async function handleCheckTrail() {
+    if (!upcomingHike?.selectedTrailId) return;
+    const declaredExp = deriveExpLevel(Number(profile.totalHikesCompleted) || 0);
+    const result = await assess({
+      userId:           profile.userId ?? "usr_001",
+      trailId:          upcomingHike.selectedTrailId,
+      plannedDate:      upcomingHike.startDate,
+      plannedStartTime: upcomingHike.startTime,
+      declaredExpLevel: declaredExp,
+    });
+    if (result) { setAssessment(result); setShowModal(true); }
+  }
 
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Up late" : hour < 12 ? "Morning" : hour < 18 ? "Afternoon" : "Evening";
@@ -354,18 +365,18 @@ export default function DashboardPage() {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={() => navigate("/trail-assessment", { state: {
-                  trailName:  `${upcomingHike.startLocation} to ${upcomingHike.endLocation}`,
-                  date:       upcomingHike.startDate,
-                  partySize:  upcomingHike.partySize,
-                }})}
-                className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-full hover:bg-primary/20 transition-colors cursor-pointer border-solid"
+                onClick={handleCheckTrail}
+                disabled={checkLoading}
+                className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-full hover:bg-primary/20 transition-colors cursor-pointer border-solid disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                Check Trail
+                {checkLoading
+                  ? <div className="w-3 h-3 border border-primary/40 border-t-primary rounded-full animate-spin" />
+                  : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                }
+                {checkLoading ? "Checking…" : "Check Trail"}
               </button>
               <button
-                onClick={() => { localStorage.removeItem("upcomingHike"); window.location.reload(); }}
+                onClick={() => { if (upcomingKey) localStorage.removeItem(upcomingKey); window.location.reload(); }}
                 className="text-muted hover:text-red transition-colors bg-transparent border-none cursor-pointer p-1"
                 title="Clear hike"
               >
@@ -397,8 +408,8 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* ── MY INCIDENTS ── */}
-        <IncidentHistory userId={profile.userId} />
+        {/* ── ACTIVE TRAIL INCIDENTS ── */}
+        <TrailIncidents trailId={upcomingHike?.selectedTrailId} />
 
         {/* ── RECOMMENDED TRAILS ── */}
         <div className="mt-8">
@@ -511,6 +522,14 @@ export default function DashboardPage() {
         </div>
 
       </main>
+
+      {/* ── ASSESSMENT MODAL ── */}
+      {showModal && assessment && (
+        <AssessmentModal
+          assessment={assessment}
+          onClose={() => setShowModal(false)}
+        />
+      )}
 
       {/* ── FOOTER ── */}
       <footer className="border-t border-white/5 mt-auto py-6 px-4 sm:px-6">

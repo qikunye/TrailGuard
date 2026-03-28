@@ -11,6 +11,9 @@ services:
       - ./Frontend/.env
     depends_on:
       - orchestrator
+      - incident-reporting
+      - completed-user-hike
+      - googlemaps-wrapper
     networks:
       - trailguard
 
@@ -237,6 +240,23 @@ services:
       - "5005:5005"
     environment:
       - PORT=5005
+    env_file:
+      - ./Services/.env
+    networks:
+      - trailguard
+    restart: unless-stopped
+
+  # ─── Completed User Hike Service ─────────────────────────────
+  completed-user-hike:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Completed_User_Hike_Service
+    ports:
+      - "5006:5006"
+    environment:
+      - PORT=5006
     env_file:
       - ./Services/.env
     networks:

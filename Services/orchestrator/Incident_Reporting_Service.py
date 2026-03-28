@@ -328,6 +328,12 @@ async def get_user_incidents(user_id: int):
         return await _get(client, f"{TRAIL_INCIDENT_URL}/incidents/user/{user_id}")
 
 
+@app.get("/incidents/trail/{trail_id}", tags=["Incident"])
+async def get_trail_incidents(trail_id: int):
+    async with httpx.AsyncClient() as client:
+        return await _get(client, f"{TRAIL_INCIDENT_URL}/incidents/trail/{trail_id}")
+
+
 # ── Health check ──────────────────────────────────────────────────────────────
 
 @app.get("/health", tags=["Ops"])

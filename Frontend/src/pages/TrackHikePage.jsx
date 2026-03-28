@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import Navbar from "../components/shared/Navbar.jsx";
+import { useProfile } from "../hooks/useProfile.js";
+
+const HIKE_URL = import.meta.env.VITE_HIKE_URL ?? "http://localhost:5006";
 
 // ── Haversine distance in metres ──────────────────────────────────────────────
 function haversine([lat1, lng1], [lat2, lng2]) {
@@ -234,38 +237,64 @@ function PastHikeCard({ hike }) {
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function TrackHikePage() {
-  const upcomingHike = (() => {
-    try { return JSON.parse(localStorage.getItem("upcomingHike")); } catch { return null; }
-  })();
+  const { profile, uid } = useProfile();
 
-  const plannedPath = upcomingHike?.path?.map((p) => [p[0], p[1]]) ?? [];
+  // UID-scoped localStorage keys
+  const registeredKey  = uid ? `registeredHikes_${uid}`  : null;
+  const hikeHistoryKey = uid ? `hikeHistory_${uid}`       : null;
+  const activeTrackKey = uid ? `activeTrack_${uid}`       : null;
+  const upcomingKey    = uid ? `upcomingHike_${uid}` : null;
+
+  // All registered hikes (from localStorage)
+  const [registeredHikes, setRegisteredHikes] = useState([]);
+  const [selectedHike, setSelectedHike] = useState(null);
+
+  const plannedPath = selectedHike?.path?.map((p) => [p[0], p[1]]) ?? [];
 
   // Tracking state
-  const [status, setStatus]         = useState("idle");   // idle | tracking | done
+  const [status, setStatus]           = useState("idle");   // idle | tracking | done
   const [trackedPath, setTrackedPath] = useState([]);
-  const [currentPos, setCurrentPos] = useState(null);
-  const [elapsed, setElapsed]       = useState(0);
-  const [startedAt, setStartedAt]   = useState(null);
-  const [geoError, setGeoError]     = useState(null);
+  const [currentPos, setCurrentPos]   = useState(null);
+  const [elapsed, setElapsed]         = useState(0);
+  const [startedAt, setStartedAt]     = useState(null);
+  const [geoError, setGeoError]       = useState(null);
+  const [hikeId, setHikeId]           = useState(null);   // OutSystems hikeId for current session
+  const [hikeCtx, setHikeCtx]         = useState(null);   // { hikerProfileId, trailId, startDate, startTime }
+  const [syncErr, setSyncErr]         = useState(null);   // non-blocking sync error
 
   // Past logs
-  const [history, setHistory] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("hikeHistory")) || []; } catch { return []; }
-  });
+  const [history, setHistory] = useState([]);
 
   const watchIdRef   = useRef(null);
   const intervalRef  = useRef(null);
-  const trackedRef   = useRef(trackedPath); // keep ref for stop handler
+  const trackedRef   = useRef(trackedPath);
   trackedRef.current = trackedPath;
   const elapsedRef   = useRef(elapsed);
   elapsedRef.current = elapsed;
   const startedAtRef = useRef(startedAt);
   startedAtRef.current = startedAt;
+  const hikeIdRef    = useRef(hikeId);
+  hikeIdRef.current  = hikeId;
+  const hikeCtxRef   = useRef(hikeCtx);
+  hikeCtxRef.current = hikeCtx;
 
-  // Resume in-progress session on mount
+  // Load registered hikes for this user
   useEffect(() => {
+    if (!registeredKey) return;
+    try { setRegisteredHikes(JSON.parse(localStorage.getItem(registeredKey)) ?? []); } catch { setRegisteredHikes([]); }
+  }, [registeredKey]);
+
+  // Load hike history for this user
+  useEffect(() => {
+    if (!hikeHistoryKey) return;
+    try { setHistory(JSON.parse(localStorage.getItem(hikeHistoryKey)) || []); } catch { setHistory([]); }
+  }, [hikeHistoryKey]);
+
+  // Resume in-progress session on mount (once uid is known)
+  useEffect(() => {
+    if (!activeTrackKey) return;
     const saved = (() => {
-      try { return JSON.parse(localStorage.getItem("activeTrack")); } catch { return null; }
+      try { return JSON.parse(localStorage.getItem(activeTrackKey)); } catch { return null; }
     })();
     if (saved?.status === "tracking") {
       const secsElapsed = Math.floor((Date.now() - new Date(saved.startedAt)) / 1000);
@@ -273,8 +302,10 @@ export default function TrackHikePage() {
       setElapsed(secsElapsed);
       setStartedAt(saved.startedAt);
       setStatus("tracking");
+      if (saved.hikeId)  setHikeId(saved.hikeId);
+      if (saved.hikeCtx) setHikeCtx(saved.hikeCtx);
     }
-  }, []);
+  }, [activeTrackKey]);
 
   // Start timer when tracking
   useEffect(() => {
@@ -284,35 +315,70 @@ export default function TrackHikePage() {
     return () => clearInterval(intervalRef.current);
   }, [status]);
 
-  // Persist active track
+  // Persist active track (so page refresh resumes correctly)
   useEffect(() => {
-    if (status === "tracking") {
-      localStorage.setItem("activeTrack", JSON.stringify({
+    if (status === "tracking" && activeTrackKey) {
+      localStorage.setItem(activeTrackKey, JSON.stringify({
         status: "tracking",
         startedAt,
+        hikeId,
+        hikeCtx,
         path: trackedPath,
       }));
     }
-  }, [trackedPath, status, startedAt]);
+  }, [trackedPath, status, startedAt, hikeId, hikeCtx, activeTrackKey]);
 
-  const startTracking = useCallback(() => {
+  const startTracking = useCallback(async () => {
     if (!navigator.geolocation) {
       setGeoError("Geolocation is not supported by your browser.");
       return;
     }
     setGeoError(null);
-    const now = new Date().toISOString();
-    setStartedAt(now);
+    setSyncErr(null);
+
+    const now       = new Date();
+    const nowIso    = now.toISOString();
+    const startDate = now.toISOString().slice(0, 10);           // YYYY-MM-DD
+    const startTime = now.toTimeString().slice(0, 8);           // HH:MM:SS
+
+    setStartedAt(nowIso);
     setTrackedPath([]);
     setElapsed(0);
+    setHikeId(null);
+    setHikeCtx(null);
     setStatus("tracking");
+
+    // POST to OutSystems to mark user as hiking (isHiking=True → appears in GetNearby)
+    const hikerProfileId = profile.userId ? Number(profile.userId) : null;
+    const trailId        = selectedHike?.selectedTrailId ? Number(selectedHike.selectedTrailId) : null;
+    if (hikerProfileId && trailId) {
+      const ctx = { hikerProfileId, trailId, startDate, startTime };
+      try {
+        const res = await fetch(`${HIKE_URL}/hikes/start`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(ctx),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const id = data.hikeId ?? data.HikeId ?? null;
+          setHikeId(id);
+          setHikeCtx(ctx);
+          hikeIdRef.current  = id;
+          hikeCtxRef.current = ctx;
+        } else {
+          setSyncErr("Could not register hike start with server — tracking locally.");
+        }
+      } catch {
+        setSyncErr("Server unreachable — tracking locally only.");
+      }
+    }
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const pt = [pos.coords.latitude, pos.coords.longitude];
         setCurrentPos(pt);
         setTrackedPath((prev) => {
-          // Deduplicate – only add if moved > 5m
           if (prev.length === 0 || haversine(prev[prev.length - 1], pt) > 5) {
             return [...prev, pt];
           }
@@ -322,37 +388,63 @@ export default function TrackHikePage() {
       (err) => setGeoError(`GPS error: ${err.message}`),
       { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
     );
-  }, []);
+  }, [profile.userId, selectedHike]);
 
-  const stopTracking = useCallback(() => {
+  const stopTracking = useCallback(async () => {
     if (watchIdRef.current != null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
     clearInterval(intervalRef.current);
 
-    const path = trackedRef.current;
-    const dist = totalDistance(path);
-    const secs = elapsedRef.current;
-    const at   = startedAtRef.current;
+    const path     = trackedRef.current;
+    const distM    = totalDistance(path);
+    const distKm   = distM / 1000;
+    const secs     = elapsedRef.current;
+    const at       = startedAtRef.current;
+    const endTime  = new Date().toTimeString().slice(0, 8);      // HH:MM:SS
+
+    // PUT to OutSystems to mark hike as completed (isHiking=False)
+    const currentHikeId = hikeIdRef.current;
+    const ctx           = hikeCtxRef.current;
+    if (currentHikeId && ctx) {
+      try {
+        await fetch(`${HIKE_URL}/hikes/${currentHikeId}/end`, {
+          method:  "PUT",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({
+            hikerProfileId: ctx.hikerProfileId,
+            trailId:        ctx.trailId,
+            startDate:      ctx.startDate,
+            startTime:      ctx.startTime,
+            endTime,
+            distance: Math.round(distKm * 1000) / 1000,
+          }),
+        });
+      } catch {
+        // Non-critical — hike is saved locally regardless
+      }
+    }
 
     const entry = {
       id:           Date.now(),
-      trailName:    upcomingHike
-        ? `${upcomingHike.startLocation} → ${upcomingHike.endLocation}`
+      trailName:    selectedHike
+        ? `${selectedHike.startLocation} → ${selectedHike.endLocation}`
         : "Free Hike",
       startedAt:    at,
       durationSecs: secs,
-      distanceM:    dist,
+      distanceM:    distM,
       path,
     };
 
     const updated = [entry, ...history];
-    localStorage.setItem("hikeHistory", JSON.stringify(updated));
-    localStorage.removeItem("activeTrack");
+    if (hikeHistoryKey) localStorage.setItem(hikeHistoryKey, JSON.stringify(updated));
+    if (activeTrackKey) localStorage.removeItem(activeTrackKey);
+    if (upcomingKey)    localStorage.removeItem(upcomingKey);
     setHistory(updated);
+    setHikeId(null);
     setStatus("done");
-  }, [history, upcomingHike]);
+  }, [history, selectedHike, hikeHistoryKey, activeTrackKey, upcomingKey]);
 
   const resetTracking = useCallback(() => {
     setStatus("idle");
@@ -372,11 +464,60 @@ export default function TrackHikePage() {
         <div className="pt-7 pb-5">
           <h1 className="text-2xl font-bold text-fg">Track Hike</h1>
           <p className="text-sm text-muted mt-0.5">
-            {upcomingHike
-              ? `${upcomingHike.startLocation} → ${upcomingHike.endLocation}`
-              : "Start tracking your GPS trail"}
+            {selectedHike
+              ? `${selectedHike.startLocation} → ${selectedHike.endLocation}`
+              : "Select a registered hike to begin"}
           </p>
         </div>
+
+        {/* ── HIKE PICKER (idle only) ── */}
+        {status === "idle" && (
+          <div className="mb-5">
+            {registeredHikes.length === 0 ? (
+              <div className="bg-white/[0.03] border border-white/5 border-dashed rounded-2xl px-4 py-6 text-center">
+                <p className="text-sm text-muted mb-1">No registered hikes</p>
+                <a href="/register-trail" className="text-xs text-primary no-underline hover:underline">
+                  Register a trail first →
+                </a>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-muted uppercase tracking-widest mb-1">Select a hike to track</p>
+                {registeredHikes.map((hike, i) => {
+                  const isSelected = selectedHike === hike;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedHike(hike)}
+                      className={`w-full text-left flex items-center gap-3 px-4 py-3.5 rounded-2xl border transition-all cursor-pointer bg-transparent ${
+                        isSelected
+                          ? "border-primary bg-primary/10"
+                          : "border-white/5 bg-white/[0.03] hover:bg-white/[0.05]"
+                      }`}
+                    >
+                      <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${isSelected ? "bg-primary" : "bg-white/20"}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-fg truncate">
+                          {hike.startLocation} → {hike.endLocation}
+                        </p>
+                        <p className="text-xs text-muted mt-0.5">
+                          Trail #{hike.selectedTrailId}
+                          {hike.startDate && ` · ${new Date(hike.startDate).toLocaleDateString("en-SG", { day: "numeric", month: "short" })}`}
+                          {hike.distanceText && ` · ${hike.distanceText}`}
+                        </p>
+                      </div>
+                      {isSelected && (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M20 6L9 17l-5-5"/>
+                        </svg>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── MAP ── */}
         <div className="rounded-2xl overflow-hidden border border-white/5 mb-4" style={{ height: 340 }}>
@@ -448,15 +589,23 @@ export default function TrackHikePage() {
           </div>
         )}
 
+        {/* ── SYNC WARNING (non-blocking) ── */}
+        {syncErr && (
+          <div className="bg-amber-400/10 border border-amber-400/20 rounded-2xl px-4 py-3 mb-4 text-sm text-amber-400">
+            ⚠ {syncErr}
+          </div>
+        )}
+
         {/* ── ACTION BUTTONS ── */}
         <div className="flex gap-3 mb-10">
           {status === "idle" && (
             <button
               onClick={startTracking}
-              className="flex-1 flex items-center justify-center gap-2 bg-primary text-black font-bold py-4 rounded-2xl text-base hover:opacity-90 transition-all border-none cursor-pointer"
+              disabled={!selectedHike}
+              className="flex-1 flex items-center justify-center gap-2 bg-primary text-black font-bold py-4 rounded-2xl text-base hover:opacity-90 transition-all border-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              Start Hike
+              {selectedHike ? "Start Hike" : "Select a hike first"}
             </button>
           )}
 
