@@ -6,6 +6,7 @@ import { useAuth } from "../hooks/useAuth.js";
 import { useProfile } from "../hooks/useProfile.js";
 import { useAssessment, deriveExpLevel } from "../hooks/useAssessment.js";
 import AssessmentModal from "../components/assessment/AssessmentModal.jsx";
+import { kongFetch } from "../lib/kongClient.js";
 
 // ── WMO code → icon + label (Open-Meteo fallback) ────────────────────────
 function wmoInfo(code) {
@@ -37,7 +38,7 @@ function googleConditionInfo(type = "") {
 }
 
 const GMAPS_KEY    = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-const INCIDENT_URL = import.meta.env.VITE_INCIDENT_URL ?? "http://localhost:8008";
+const INCIDENT_URL = import.meta.env.VITE_INCIDENT_URL ?? "http://localhost:8080/api/incident";
 
 const SEVERITY_LABELS = { 1: "Minor", 2: "Moderate", 3: "Serious", 4: "Critical", 5: "Fatal" };
 const SEVERITY_COLOR  = (s) => s >= 4 ? "text-red bg-red/10 border-red/20" : s >= 3 ? "text-amber bg-amber/10 border-amber/20" : "text-primary bg-primary/10 border-primary/20";
@@ -51,7 +52,7 @@ function TrailIncidents({ trailId }) {
     if (!trailId) return;
     setLoading(true);
     setError(null);
-    fetch(`${INCIDENT_URL}/incidents/trail/${trailId}/active`)
+    kongFetch(`${INCIDENT_URL}/incidents/trail/${trailId}/active`)
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();

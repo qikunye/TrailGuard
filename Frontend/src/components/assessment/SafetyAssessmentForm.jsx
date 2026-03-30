@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { kongFetch } from "../../lib/kongClient.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ORCHESTRATOR_URL =
-  import.meta.env.VITE_ORCHESTRATOR_URL || "http://localhost:8000";
+  import.meta.env.VITE_ORCHESTRATOR_URL || "http://localhost:8080/api/orchestrator";
 
 const EXPERIENCE_LEVELS = [
   { value: "beginner",     label: "Beginner",     desc: "< 5 hikes" },
@@ -702,7 +703,7 @@ export default function SafetyAssessmentForm() {
     const iv = startStepSimulation();
 
     try {
-      const resp = await fetch(`${ORCHESTRATOR_URL}/assess-trail`, {
+      const resp = await kongFetch(`${ORCHESTRATOR_URL}/assess-trail`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),

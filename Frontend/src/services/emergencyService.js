@@ -1,4 +1,6 @@
-const INCIDENT_BASE = import.meta.env.VITE_INCIDENT_URL ?? "http://localhost:8008";
+import { kongFetch } from "../lib/kongClient.js";
+
+const INCIDENT_BASE = import.meta.env.VITE_INCIDENT_URL ?? "http://localhost:8080/api/incident";
 
 /**
  * POST /incident-reporting
@@ -16,7 +18,7 @@ const INCIDENT_BASE = import.meta.env.VITE_INCIDENT_URL ?? "http://localhost:800
  * }} data
  */
 export async function submitIncidentReport(data) {
-  const res = await fetch(`${INCIDENT_BASE}/incident-reporting`, {
+  const res = await kongFetch(`${INCIDENT_BASE}/incident-reporting`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),

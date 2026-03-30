@@ -1,5 +1,58 @@
 services:
 
+  # ─── Kong API Gateway ────────────────────────────────────────
+  # Single unified entry point for all client requests.
+  # DB-less mode: all config lives in kong/kong.yml (no Postgres needed).
+  kong:
+    image: kong:3.6
+    platform: linux/amd64
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+      # Upstream timeouts in milliseconds (for slow LLM / OutSystems calls)
+      KONG_PROXY_READ_TIMEOUT: "120000"
+      KONG_PROXY_WRITE_TIMEOUT: "120000"
+      KONG_PROXY_CONNECT_TIMEOUT: "10000"
+    volumes:
+      - ./kong/kong.yml:/kong/kong.yml:ro
+    ports:
+      - "8080:8000"    # HTTP proxy  — clients call http://localhost:8080/api/...
+      - "8443:8443"    # HTTPS proxy — ready for TLS certs when you add them
+      - "8001:8001"    # Admin API   — NEVER expose publicly in production!
+    networks:
+      - trailguard
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ─── Konga — Kong Admin UI ───────────────────────────────────
+  # Dashboard for inspecting routes, consumers, plugins, and logs.
+  # Access at: http://localhost:1337
+  # On first login, connect to: http://kong:8001
+  konga:
+    image: pantsel/konga:latest
+    platform: linux/amd64
+    ports:
+      - "1337:1337"
+    environment:
+      NODE_ENV: development
+    networks:
+      - trailguard
+    restart: unless-stopped
+    depends_on:
+      kong:
+        condition: service_healthy
+
   # ─── Frontend ───────────────────────────────────────────────
   frontend:
     build:
@@ -10,20 +63,19 @@ services:
     env_file:
       - ./Frontend/.env
     depends_on:
-      - orchestrator
-      - incident-reporting
-      - completed-user-hike
-      - googlemaps-wrapper
+      kong:
+        condition: service_healthy
     networks:
       - trailguard
 
   # ─── Orchestrator ───────────────────────────────────────────
+  # NOTE: No host port exposed — all external traffic must go through Kong.
   orchestrator:
     build:
       context: ./Services
       dockerfile: orchestrator/Dockerfile
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
       - PORT=8000
       - HIKER_PROFILE_URL=http://hiker-profile:8001
@@ -53,8 +105,8 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: Hiker_Profile_Service
-    ports:
-      - "8001:8001"
+    expose:
+      - "8001"
     environment:
       - PORT=8001
     env_file:
@@ -68,8 +120,8 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: Trail_Condition_Service
-    ports:
-      - "8002:8002"
+    expose:
+      - "8002"
     environment:
       - PORT=8002
     env_file:
@@ -83,8 +135,8 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: Incident_Risk_Service
-    ports:
-      - "8003:8003"
+    expose:
+      - "8003"
     environment:
       - PORT=8003
     env_file:
@@ -98,8 +150,8 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: Hike_Completion_Service
-    ports:
-      - "8004:8004"
+    expose:
+      - "8004"
     environment:
       - PORT=8004
     env_file:
@@ -114,8 +166,8 @@ services:
       dockerfile: wrappers/Dockerfile
       args:
         SERVICE: Weather_Wrapper
-    ports:
-      - "8005:8005"
+    expose:
+      - "8005"
     environment:
       - PORT=8005
     env_file:
@@ -129,8 +181,8 @@ services:
       dockerfile: wrappers/Dockerfile
       args:
         SERVICE: Evaluator_Wrapper
-    ports:
-      - "8006:8006"
+    expose:
+      - "8006"
     environment:
       - PORT=8006
     env_file:
@@ -144,8 +196,8 @@ services:
       dockerfile: wrappers/Dockerfile
       args:
         SERVICE: GoogleMaps_Wrapper
-    ports:
-      - "8007:8007"
+    expose:
+      - "8007"
     environment:
       - PORT=8007
     env_file:
@@ -158,8 +210,8 @@ services:
     build:
       context: ./Services
       dockerfile: Dockerfile.notification
-    ports:
-      - "5050:5050"
+    expose:
+      - "5050"
     environment:
       - PORT=5050
     env_file:
@@ -174,8 +226,8 @@ services:
       context: ./Services
       dockerfile: orchestrator/Dockerfile
     command: uvicorn Incident_Reporting_Service:app --host 0.0.0.0 --port 8008
-    ports:
-      - "8008:8008"
+    expose:
+      - "8008"
     environment:
       - PORT=8008
       - GOOGLEMAPS_URL=http://googlemaps-wrapper:8007
@@ -202,8 +254,8 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: Trail_Incident
-    ports:
-      - "5004:5004"
+    expose:
+      - "5004"
     environment:
       - PORT=5004
     env_file:
@@ -219,8 +271,8 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: Emergency_Contacts_Service
-    ports:
-      - "5003:5003"
+    expose:
+      - "5003"
     environment:
       - PORT=5003
     env_file:
@@ -236,8 +288,8 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: Nearby_Users_Service
-    ports:
-      - "5005:5005"
+    expose:
+      - "5005"
     environment:
       - PORT=5005
     env_file:
@@ -253,8 +305,8 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: Completed_User_Hike_Service
-    ports:
-      - "5006:5006"
+    expose:
+      - "5006"
     environment:
       - PORT=5006
     env_file:

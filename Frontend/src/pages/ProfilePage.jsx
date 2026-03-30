@@ -4,11 +4,12 @@ import Navbar from "../components/shared/Navbar.jsx";
 import { useAuth } from "../hooks/useAuth.js";
 import { useProfile } from "../hooks/useProfile.js";
 import { deriveExpLevel } from "../hooks/useAssessment.js";
+import { kongFetch } from "../lib/kongClient.js";
 
 const ORCHESTRATOR_URL =
   import.meta.env.VITE_ORCHESTRATOR_URL ||
   import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:8000";
+  "http://localhost:8080/api/orchestrator";
 
 const wrap  = "flex items-center bg-surface border border-line rounded-full px-4 gap-2.5 transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20";
 const input = "flex-1 bg-transparent border-none outline-none text-fg text-[0.9rem] py-3 font-[inherit] placeholder:text-muted min-w-0";
@@ -92,7 +93,7 @@ export default function ProfilePage() {
 
     try {
       if (existingUserId) {
-        const res = await fetch(`${ORCHESTRATOR_URL}/hiker-profile/${existingUserId}`, {
+        const res = await kongFetch(`${ORCHESTRATOR_URL}/hiker-profile/${existingUserId}`, {
           method:  "PUT",
           headers: { "Content-Type": "application/json" },
           body:    JSON.stringify(apiPayload),
@@ -102,7 +103,7 @@ export default function ProfilePage() {
           if (data.userId && data.userId !== existingUserId) userId = data.userId;
         }
       } else {
-        const res = await fetch(`${ORCHESTRATOR_URL}/hiker-profile`, {
+        const res = await kongFetch(`${ORCHESTRATOR_URL}/hiker-profile`, {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
           body:    JSON.stringify(apiPayload),

@@ -10,13 +10,15 @@
  *
  * Old /trail-safety-assessment route (unused) has been removed.
  */
+import { kongFetch } from "../lib/kongClient.js";
+
 const ORCHESTRATOR_URL =
   import.meta.env.VITE_ORCHESTRATOR_URL ||
   import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:8000";
+  "http://localhost:8080/api/orchestrator";
 
 export async function getTrailAssessment({ userId, trailId, plannedDate, plannedStartTime, declaredExpLevel }) {
-  const res = await fetch(`${ORCHESTRATOR_URL}/assess-trail`, {
+  const res = await kongFetch(`${ORCHESTRATOR_URL}/assess-trail`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ userId, trailId, plannedDate, plannedStartTime, declaredExpLevel }),

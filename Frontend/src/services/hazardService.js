@@ -1,11 +1,12 @@
 import { API_BASE } from "../config/constants.js";
+import { kongFetch } from "../lib/kongClient.js";
 
 /**
  * POST /report-ingestion
  * @param {{ trailId: string, hazardType: string, description: string, location: object, photoUrl?: string }} data
  */
 export async function submitHazardReport(data) {
-  const res = await fetch(`${API_BASE}/report-ingestion`, {
+  const res = await kongFetch(`${API_BASE}/report-ingestion`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -18,7 +19,7 @@ export async function submitHazardReport(data) {
  * GET /alternative-routes?trailId=...
  */
 export async function getAlternativeRoutes(trailId) {
-  const res = await fetch(`${API_BASE}/alternative-routes?trailId=${trailId}`);
+  const res = await kongFetch(`${API_BASE}/alternative-routes?trailId=${trailId}`);
   if (!res.ok) throw new Error("Failed to fetch alternative routes");
   return res.json();
 }
