@@ -45,6 +45,10 @@ app.config["JSON_SORT_KEYS"] = False
 
 E164_RE = re.compile(r"^\+[1-9]\d{7,14}$")
 
+# Twilio trial accounts can only send to verified numbers.
+# Set this to your verified number so all SMS are routed there for testing.
+TWILIO_OVERRIDE_TO = os.environ.get("TWILIO_OVERRIDE_TO", "")
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -53,7 +57,8 @@ def is_valid_e164(phone: str) -> bool:
 
 
 def send_sms(to: str, body: str) -> str:
-    msg = twilio_client.messages.create(body=body, from_=TWILIO_FROM_NUMBER, to=to)
+    actual_to = TWILIO_OVERRIDE_TO if TWILIO_OVERRIDE_TO else to
+    msg = twilio_client.messages.create(body=body, from_=TWILIO_FROM_NUMBER, to=actual_to)
     return msg.status
 
 
@@ -65,14 +70,24 @@ def _send_batch(recipients: list[dict], body: str, recipient_type: str | None = 
         if recipient_type:
             entry["recipientType"] = recipient_type
 
-        if not is_valid_e164(phone):
+        # If an override number is set, skip E.164 validation on the original
+        # number — the override number will be used for actual delivery.
+        if not TWILIO_OVERRIDE_TO and not is_valid_e164(phone):
             log.warning("Invalid E.164 number skipped: %s", phone)
+            entry["twilioStatus"] = "failed"
+            results.append(entry)
+            continue
+
+        if not phone:
+            log.warning("Empty phone number skipped")
             entry["twilioStatus"] = "failed"
             results.append(entry)
             continue
 
         try:
             entry["twilioStatus"] = send_sms(phone, body)
+            if TWILIO_OVERRIDE_TO:
+                log.info("SMS for %s routed to override number %s", phone, TWILIO_OVERRIDE_TO)
         except TwilioRestException as e:
             log.error("Twilio error for %s: %s", phone, e)
             entry["twilioStatus"] = "failed"
