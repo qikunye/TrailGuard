@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
+import { kongFetch } from "../../lib/kongClient.js";
 
-const WRAPPER = import.meta.env.VITE_MAPS_WRAPPER_URL || "/api";
+const WRAPPER = import.meta.env.VITE_MAPS_WRAPPER_URL || "http://localhost:8080/api/maps";
 const SG      = [1.3521, 103.8198];
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -62,7 +63,7 @@ function LocationInput({ placeholder, color, onSelect, defaultValue, label }) {
       }
     }
     // Otherwise geocode the address string via the Maps wrapper.
-    fetch(`${WRAPPER}/geocode?address=${encodeURIComponent(defaultValue)}`)
+    kongFetch(`${WRAPPER}/geocode?address=${encodeURIComponent(defaultValue)}`)
       .then(r => r.json())
       .then(data => {
         const lat = Number(data.lat);
@@ -85,7 +86,7 @@ function LocationInput({ placeholder, color, onSelect, defaultValue, label }) {
     if (val.length < 2) { setSuggestions([]); setOpen(false); return; }
     setLoading(true);
     try {
-      const res  = await fetch(`${WRAPPER}/autocomplete?input=${encodeURIComponent(val)}`);
+      const res  = await kongFetch(`${WRAPPER}/autocomplete?input=${encodeURIComponent(val)}`);
       const data = await res.json();
       setSuggestions(data.predictions || []);
       setOpen(true);
@@ -108,7 +109,7 @@ function LocationInput({ placeholder, color, onSelect, defaultValue, label }) {
     setSuggestions([]);
     setOpen(false);
     try {
-      const res  = await fetch(`${WRAPPER}/geocode?address=${encodeURIComponent(p.description)}`);
+      const res  = await kongFetch(`${WRAPPER}/geocode?address=${encodeURIComponent(p.description)}`);
       const data = await res.json();
       onSelect({ name: p.mainText, lat: data.lat, lng: data.lng, formatted: p.description });
     } catch {
@@ -174,7 +175,7 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
 
     (async () => {
       try {
-        const res  = await fetch(
+        const res  = await kongFetch(
           `${WRAPPER}/directions?origin_lat=${start.lat}&origin_lng=${start.lng}&dest_lat=${end.lat}&dest_lng=${end.lng}&mode=walking`
         );
         const data = await res.json();

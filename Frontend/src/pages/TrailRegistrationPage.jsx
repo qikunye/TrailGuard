@@ -5,11 +5,12 @@ import HikeRouteMap from "../components/map/HikeRouteMap.jsx";
 import { useAssessment, deriveExpLevel } from "../hooks/useAssessment.js";
 import { useProfile } from "../hooks/useProfile.js";
 import AssessmentModal from "../components/assessment/AssessmentModal.jsx";
+import { kongFetch } from "../lib/kongClient.js";
 
 const ORCHESTRATOR_URL =
   import.meta.env.VITE_ORCHESTRATOR_URL ||
   import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:8000";
+  "http://localhost:8080/api/orchestrator";
 
 const wrap = "flex items-center bg-surface border border-line rounded-full px-4 gap-2.5 transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20";
 const inp  = "flex-1 bg-transparent border-none outline-none text-fg text-[0.9rem] py-3 font-[inherit] placeholder:text-muted min-w-0";
@@ -33,7 +34,7 @@ export default function TrailRegistrationPage() {
   // ── Trail list from GET /trails (proxied from TrailDBAPI/GetAllTrails) ──────
   const [trails, setTrails] = useState(FALLBACK_TRAILS);
   useEffect(() => {
-    fetch(`${ORCHESTRATOR_URL}/trails`)
+    kongFetch(`${ORCHESTRATOR_URL}/trails`)
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(data => { if (data.trails?.length) setTrails(data.trails); })
       .catch(() => { /* keep FALLBACK_TRAILS silently */ });

@@ -7,8 +7,9 @@ import { useEmergency } from "../hooks/useEmergency.js";
 import { useGeolocation } from "../hooks/useGeolocation.js";
 import { useProfile } from "../hooks/useProfile.js";
 import { useNavigate } from "react-router-dom";
+import { kongFetch } from "../lib/kongClient.js";
 
-const MAPS_URL = import.meta.env.VITE_MAPS_WRAPPER_URL ?? "http://localhost:8007";
+const MAPS_URL = import.meta.env.VITE_MAPS_WRAPPER_URL ?? "http://localhost:8080/api/maps";
 
 export default function EmergencyReportPage() {
   const { submitReport, loading, error } = useEmergency();
@@ -37,7 +38,7 @@ export default function EmergencyReportPage() {
   // ── Resolve GPS coords to human-readable address ──────────────────────────
   useEffect(() => {
     if (!coords) return;
-    fetch(`${MAPS_URL}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
+    kongFetch(`${MAPS_URL}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.formattedAddress) setResolvedAddress(data.formattedAddress); })
       .catch(() => {});

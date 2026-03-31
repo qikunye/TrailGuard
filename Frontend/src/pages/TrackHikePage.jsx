@@ -3,8 +3,9 @@ import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from "react-l
 import "leaflet/dist/leaflet.css";
 import Navbar from "../components/shared/Navbar.jsx";
 import { useProfile } from "../hooks/useProfile.js";
+import { kongFetch } from "../lib/kongClient.js";
 
-const HIKE_URL = import.meta.env.VITE_HIKE_URL ?? "http://localhost:5006";
+const HIKE_URL = import.meta.env.VITE_HIKE_URL ?? "http://localhost:8080/api/completed";
 
 // ── Haversine distance in metres ──────────────────────────────────────────────
 function haversine([lat1, lng1], [lat2, lng2]) {
@@ -356,7 +357,7 @@ export default function TrackHikePage() {
     if (hikerProfileId && trailId) {
       const ctx = { hikerProfileId, trailId, startDate, startTime };
       try {
-        const res = await fetch(`${HIKE_URL}/hikes/start`, {
+        const res = await kongFetch(`${HIKE_URL}/hikes/start`, {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
           body:    JSON.stringify(ctx),
@@ -411,7 +412,7 @@ export default function TrackHikePage() {
     const ctx           = hikeCtxRef.current;
     if (currentHikeId && ctx) {
       try {
-        await fetch(`${HIKE_URL}/hikes/${currentHikeId}/end`, {
+        await kongFetch(`${HIKE_URL}/hikes/${currentHikeId}/end`, {
           method:  "PUT",
           headers: { "Content-Type": "application/json" },
           body:    JSON.stringify({

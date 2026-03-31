@@ -1,0 +1,384 @@
+_format_version: "3.0"
+_transform: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TRAILGUARD — Kong Gateway Declarative Configuration
+# Mode: DB-less (no PostgreSQL required)
+#
+# Route map:
+#   /api/orchestrator  → orchestrator:8000   (hike flow + safety assessment)
+#   /api/incident      → incident-reporting:8008
+#   /api/hiker         → hiker-profile:8001
+#   /api/trail         → trail-condition:8002
+#   /api/risk          → incident-risk:8003
+#   /api/completion    → hike-completion:8004
+#   /api/weather       → weather-wrapper:8005
+#   /api/evaluator     → evaluator-wrapper:8006
+#   /api/maps          → googlemaps-wrapper:8007
+#   /api/notify        → notification-wrapper:5050
+#   /api/emergency     → emergency-contacts:5003
+#   /api/incidents-svc → incident-service:5004
+#   /api/nearby        → nearby-users:5005
+#   /api/completed     → completed-user-hike:5006
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ── Global Plugins ─────────────────────────────────────────────────────────────
+# These apply to EVERY service and route unless overridden at a lower scope.
+
+plugins:
+
+  # Rate limiting — 100 req/min and 2000 req/hour per consumer (or per IP for anonymous)
+  - name: rate-limiting
+    config:
+      minute: 100
+      hour: 2000
+      policy: local                     # Switch to "redis" for multi-node deployments
+      hide_client_headers: false        # Let clients see X-RateLimit-* headers
+      error_message: "Rate limit exceeded. Please slow down."
+
+  # Request logging — append JSON log lines to /tmp/kong-access.log
+  - name: file-log
+    config:
+      path: /tmp/kong-access.log
+      reopen: true
+
+  # Prometheus — expose Kong metrics at http://kong:8001/metrics for scraping
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
+      per_consumer: true
+
+  # CORS — allow the TrailGuard frontend (and any local dev origin) through
+  - name: cors
+    config:
+      origins:
+        - "http://localhost:5173"       # Vite dev server
+        - "http://localhost:8080"       # Kong itself (if frontend proxied)
+        - "*"                           # Tighten this in production!
+      methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+        - PATCH
+      headers:
+        - Accept
+        - Authorization
+        - Content-Type
+        - X-API-Key
+      exposed_headers:
+        - X-RateLimit-Limit-Minute
+        - X-RateLimit-Remaining-Minute
+      credentials: true
+      max_age: 3600
+
+
+# ── Consumers & API Keys ───────────────────────────────────────────────────────
+# Add more consumers (e.g. mobile-app, admin-tools) as needed.
+# IMPORTANT: Replace these key values with strong random secrets before deploying!
+
+consumers:
+  - username: frontend-app
+    keyauth_credentials:
+      - key: tg-frontend-key-change-me-in-production
+
+  - username: internal-service
+    keyauth_credentials:
+      - key: tg-internal-key-change-me-in-production
+
+  - username: dev-testing
+    keyauth_credentials:
+      - key: tg-dev-key-local-only
+
+
+# ── Services & Routes ──────────────────────────────────────────────────────────
+# strip_path: true  →  removes the /api/<prefix> before forwarding to the upstream.
+# Example: GET /api/orchestrator/assess-trail → orchestrator:8000/assess-trail
+
+services:
+
+  # ── Orchestrator (Trail Safety Assessment + Hiker Profile proxies) ────────────
+  - name: orchestrator
+    url: http://orchestrator:8000
+    connect_timeout: 10000             # ms
+    read_timeout: 60000                # 60s — safety assessment calls OpenAI
+    write_timeout: 60000
+    routes:
+      - name: orchestrator-route
+        paths:
+          - /api/orchestrator
+        strip_path: true
+        methods: [GET, POST, PUT, DELETE, OPTIONS, PATCH]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true       # Strip the key before forwarding upstream
+      # Tighter rate limit — orchestrator calls OpenAI via evaluator-wrapper
+      - name: rate-limiting
+        config:
+          minute: 30
+          policy: local
+
+  # ── Incident Reporting (Composite orchestrator — scenario 2) ─────────────────
+  - name: incident-reporting
+    url: http://incident-reporting:8008
+    connect_timeout: 10000
+    read_timeout: 30000
+    write_timeout: 30000
+    routes:
+      - name: incident-reporting-route
+        paths:
+          - /api/incident
+        strip_path: true
+        methods: [GET, POST, PUT, DELETE, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Hiker Profile (Atomic — OutSystems + local mock) ─────────────────────────
+  - name: hiker-profile
+    url: http://hiker-profile:8001
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: hiker-profile-route
+        paths:
+          - /api/hiker
+        strip_path: true
+        methods: [GET, POST, PUT, DELETE, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Trail Condition (Atomic — OutSystems) ─────────────────────────────────────
+  - name: trail-condition
+    url: http://trail-condition:8002
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: trail-condition-route
+        paths:
+          - /api/trail
+        strip_path: true
+        methods: [GET, POST, PUT, DELETE, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Incident Risk (Atomic — OutSystems incidents) ─────────────────────────────
+  - name: incident-risk
+    url: http://incident-risk:8003
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: incident-risk-route
+        paths:
+          - /api/risk
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Hike Completion (Atomic) ──────────────────────────────────────────────────
+  - name: hike-completion
+    url: http://hike-completion:8004
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: hike-completion-route
+        paths:
+          - /api/completion
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Weather Wrapper (Open-Meteo) ──────────────────────────────────────────────
+  - name: weather-wrapper
+    url: http://weather-wrapper:8005
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: weather-wrapper-route
+        paths:
+          - /api/weather
+        strip_path: true
+        methods: [GET, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Evaluator Wrapper (OpenAI GPT) ────────────────────────────────────────────
+  - name: evaluator-wrapper
+    url: http://evaluator-wrapper:8006
+    connect_timeout: 10000
+    read_timeout: 60000                # OpenAI can be slow
+    write_timeout: 60000
+    routes:
+      - name: evaluator-wrapper-route
+        paths:
+          - /api/evaluator
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+      # Extra-strict limit — every call costs OpenAI tokens
+      - name: rate-limiting
+        config:
+          minute: 10
+          policy: local
+
+  # ── Google Maps Wrapper ───────────────────────────────────────────────────────
+  - name: googlemaps-wrapper
+    url: http://googlemaps-wrapper:8007
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: googlemaps-wrapper-route
+        paths:
+          - /api/maps
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Notification Wrapper (Twilio SMS) ─────────────────────────────────────────
+  - name: notification-wrapper
+    url: http://notification-wrapper:5050
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: notification-wrapper-route
+        paths:
+          - /api/notify
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+      # Rate-limit SMS calls to avoid Twilio bill shock
+      - name: rate-limiting
+        config:
+          minute: 20
+          policy: local
+
+  # ── Emergency Contacts (Atomic — OutSystems) ──────────────────────────────────
+  - name: emergency-contacts
+    url: http://emergency-contacts:5003
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: emergency-contacts-route
+        paths:
+          - /api/emergency
+        strip_path: true
+        methods: [GET, POST, PUT, DELETE, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Incident Service (Firestore) ──────────────────────────────────────────────
+  - name: incident-service
+    url: http://incident-service:5004
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: incident-service-route
+        paths:
+          - /api/incidents-svc
+        strip_path: true
+        methods: [GET, POST, PUT, DELETE, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Nearby Users (Atomic — OutSystems HikeProgressAPI) ───────────────────────
+  - name: nearby-users
+    url: http://nearby-users:5005
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: nearby-users-route
+        paths:
+          - /api/nearby
+        strip_path: true
+        methods: [GET, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Completed User Hike Service ───────────────────────────────────────────────
+  - name: completed-user-hike
+    url: http://completed-user-hike:5006
+    connect_timeout: 10000
+    read_timeout: 20000
+    write_timeout: 20000
+    routes:
+      - name: completed-user-hike-route
+        paths:
+          - /api/completed
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
