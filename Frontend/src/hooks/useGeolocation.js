@@ -21,7 +21,7 @@ export function useGeolocation() {
         setError(err.message);
         setLoading(false);
       },
-      { enableHighAccuracy: true }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
     );
 
     return () => navigator.geolocation.clearWatch(id);

@@ -19,9 +19,7 @@ export default function EmergencyConfirmPage() {
   return (
     <div className="flex flex-col min-h-screen relative z-[1]">
       <Navbar />
-      <main className="flex-1 p-6 max-w-[1100px] mx-auto w-full">
-        <h1 className="text-[1.4rem] font-bold text-fg mb-1">Help is on the way</h1>
-        <p className="text-sm text-muted mb-6">Your emergency report has been submitted</p>
+      <main className="flex-1 px-4 py-5 max-w-[430px] mx-auto w-full">
         <EmergencyStatusCard result={result} notifiedContacts={notifiedContacts} />
       </main>
     </div>
