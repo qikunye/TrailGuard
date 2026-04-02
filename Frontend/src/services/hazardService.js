@@ -1,12 +1,13 @@
-import { API_BASE } from "../config/constants.js";
 import { kongFetch } from "../lib/kongClient.js";
 
+const HAZARD_REPORT_URL = import.meta.env.VITE_HAZARD_REPORT_URL ?? "http://localhost:8080/api/hazard-report";
+const ALT_ROUTE_URL     = import.meta.env.VITE_ALT_ROUTE_URL     ?? "http://localhost:8080/api/alt-route";
+
 /**
- * POST /report-ingestion
- * @param {{ trailId: string, hazardType: string, description: string, location: object, photoUrl?: string }} data
+ * POST /report-hazard  →  Report Ingestion Service (port 8010)
  */
 export async function submitHazardReport(data) {
-  const res = await kongFetch(`${API_BASE}/report-ingestion`, {
+  const res = await kongFetch(`${HAZARD_REPORT_URL}/report-hazard`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -16,10 +17,14 @@ export async function submitHazardReport(data) {
 }
 
 /**
- * GET /alternative-routes?trailId=...
+ * POST /alternative-route  →  Alternative Route Service (port 8009)
  */
-export async function getAlternativeRoutes(trailId) {
-  const res = await kongFetch(`${API_BASE}/alternative-routes?trailId=${trailId}`);
+export async function getAlternativeRoutes(data) {
+  const res = await kongFetch(`${ALT_ROUTE_URL}/alternative-route`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
   if (!res.ok) throw new Error("Failed to fetch alternative routes");
   return res.json();
 }

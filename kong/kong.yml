@@ -20,6 +20,8 @@ _transform: true
 #   /api/incidents-svc → incident-service:5004
 #   /api/nearby        → nearby-users:5005
 #   /api/completed     → completed-user-hike:5006
+#   /api/hazard-report → report-ingestion:8010
+#   /api/alt-route     → alternative-route:8009
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -374,6 +376,44 @@ services:
       - name: completed-user-hike-route
         paths:
           - /api/completed
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Report Ingestion (Scenario 3 — Hazard Reporting) ─────────────────────────
+  - name: report-ingestion
+    url: http://report-ingestion:8010
+    connect_timeout: 10000
+    read_timeout: 30000
+    write_timeout: 30000
+    routes:
+      - name: report-ingestion-route
+        paths:
+          - /api/hazard-report
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
+  # ── Alternative Route (Scenario 3 — Rerouting) ──────────────────────────────
+  - name: alternative-route
+    url: http://alternative-route:8009
+    connect_timeout: 10000
+    read_timeout: 30000
+    write_timeout: 30000
+    routes:
+      - name: alternative-route-route
+        paths:
+          - /api/alt-route
         strip_path: true
         methods: [GET, POST, OPTIONS]
         preserve_host: false
