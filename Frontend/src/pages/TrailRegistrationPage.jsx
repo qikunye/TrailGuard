@@ -127,7 +127,6 @@ export default function TrailRegistrationPage() {
             <h2 className="text-xl font-bold text-fg mb-1">Hike Registered!</h2>
             {selectedTrail && <p className="text-sm text-primary mb-1">{selectedTrail.trailName}</p>}
             {form.distanceText && <p className="text-sm text-muted mb-1">{form.distanceText} · {form.durationText} walking</p>}
-            <p className="text-sm text-muted mb-6">Your emergency contacts will be notified if you don&apos;t check in on time.</p>
             <div className="flex gap-3 max-w-xs mx-auto">
               <button onClick={() => setSubmitted(false)}
                 className="flex-1 py-3 px-4 bg-transparent border border-line text-muted rounded-full text-sm font-semibold cursor-pointer transition-colors hover:border-primary hover:text-fg">
