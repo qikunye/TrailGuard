@@ -65,6 +65,26 @@ export default function HazardReportPage() {
     // call the service directly if the full chain didn't return data.
     sessionStorage.setItem("hazardPayload", JSON.stringify(data));
 
+    // Persist the reported hazard to localStorage so TrackHikePage can display it
+    if (uid && data.trailId) {
+      try {
+        const key = `reportedHazards_${uid}`;
+        const existing = JSON.parse(localStorage.getItem(key) ?? "[]");
+        existing.push({
+          id: `haz_${Date.now()}`,
+          trailId: String(data.trailId),
+          hazardType: hazardType ?? data.hazardType ?? "Unknown",
+          severity: data.severity ?? 3,
+          hazardLat: data.hazardLat,
+          hazardLng: data.hazardLng,
+          description: data.description ?? "",
+          locationDescription: data.location?.description ?? "",
+          reportedAt: new Date().toISOString(),
+        });
+        localStorage.setItem(key, JSON.stringify(existing));
+      } catch { /* ignore */ }
+    }
+
     const result = await submitReport({ ...data, hazardType });
     if (result?.reroutingResult) {
       sessionStorage.setItem("altRouteData", JSON.stringify(result.reroutingResult));

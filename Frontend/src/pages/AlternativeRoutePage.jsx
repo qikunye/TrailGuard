@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, Polyline, CircleMarker, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet-polylineoffset";
 import Navbar from "../components/shared/Navbar.jsx";
 import { getAlternativeRoutes } from "../services/hazardService.js";
 import { useProfile } from "../hooks/useProfile.js";
@@ -20,6 +21,59 @@ const TRAIL_DB = {
   "9":  { name: "Admiralty Park Mangrove Trail",  difficulty: "Easy",    startLat: 1.4406, startLng: 103.7990, endLat: 1.4451, endLng: 103.8032 },
   "10": { name: "Clementi Forest Trail",         difficulty: "Moderate", startLat: 1.3243, startLng: 103.7682, endLat: 1.3299, endLng: 103.7748 },
 };
+
+// ── Polyline simplification & smoothing ─────────────────────────────────────
+
+// Perpendicular distance from point p to line segment a→b (in degrees, fine for small areas)
+function _perpDist(p, a, b) {
+  const dx = b[1] - a[1], dy = b[0] - a[0];
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.sqrt((p[0] - a[0]) ** 2 + (p[1] - a[1]) ** 2);
+  let t = ((p[1] - a[1]) * dx + (p[0] - a[0]) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const projLat = a[0] + t * dy, projLng = a[1] + t * dx;
+  return Math.sqrt((p[0] - projLat) ** 2 + (p[1] - projLng) ** 2);
+}
+
+// Ramer-Douglas-Peucker — removes unnecessary points
+function simplifyPath(pts, epsilon = 0.0003) {
+  if (pts.length <= 2) return pts;
+  let maxD = 0, idx = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = _perpDist(pts[i], pts[0], pts[pts.length - 1]);
+    if (d > maxD) { maxD = d; idx = i; }
+  }
+  if (maxD > epsilon) {
+    const left = simplifyPath(pts.slice(0, idx + 1), epsilon);
+    const right = simplifyPath(pts.slice(idx), epsilon);
+    return left.slice(0, -1).concat(right);
+  }
+  return [pts[0], pts[pts.length - 1]];
+}
+
+// Chaikin corner-cutting — produces smooth curves from simplified polyline
+function smoothPath(pts, iterations = 3) {
+  let result = pts;
+  for (let iter = 0; iter < iterations; iter++) {
+    if (result.length < 3) return result;
+    const next = [result[0]];
+    for (let i = 0; i < result.length - 1; i++) {
+      const [aLat, aLng] = result[i];
+      const [bLat, bLng] = result[i + 1];
+      next.push([aLat * 0.75 + bLat * 0.25, aLng * 0.75 + bLng * 0.25]);
+      next.push([aLat * 0.25 + bLat * 0.75, aLng * 0.25 + bLng * 0.75]);
+    }
+    next.push(result[result.length - 1]);
+    result = next;
+  }
+  return result;
+}
+
+// Simplify then smooth for a clean, aesthetic polyline
+function cleanPath(pts) {
+  if (pts.length <= 2) return pts;
+  return smoothPath(simplifyPath(pts, 0.0003), 3);
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function fmtDist(m) {
@@ -50,43 +104,83 @@ async function osrmAlternatives(sLat, sLng, eLat, eLng) {
     durationSeconds: r.duration,
   }));
 }
-async function osrmViaRoute(sLat, sLng, vLat, vLng, eLat, eLng) {
-  const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${sLng},${sLat};${vLng},${vLat};${eLng},${eLat}?overview=full&geometries=geojson`;
+async function osrmViaRoute(coords) {
+  // coords: array of [lat, lng] waypoints (2 or more)
+  const waypointStr = coords.map(([lat, lng]) => `${lng},${lat}`).join(";");
+  const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${waypointStr}?overview=full&geometries=geojson`;
   const res = await fetch(url);
   const data = await res.json();
   if (data.code !== "Ok" || !data.routes?.length) return null;
   const r = data.routes[0];
   return { path: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]), distanceMetres: r.distance, durationSeconds: r.duration };
 }
-function computeDetourPoint(sLat, sLng, eLat, eLng, hLat, hLng) {
-  const midLat = (sLat + eLat) / 2, midLng = (sLng + eLng) / 2;
-  let dlat = midLat - hLat, dlng = midLng - hLng;
-  const len = Math.sqrt(dlat ** 2 + dlng ** 2);
-  const offset = 0.008;
-  if (len < 1e-7) { const tl = eLat - sLat, tg = eLng - sLng; const pl = Math.sqrt(tl ** 2 + tg ** 2); return pl < 1e-7 ? [midLat + offset, midLng + offset] : [midLat + offset * (-tg) / pl, midLng + offset * tl / pl]; }
-  return [midLat + offset * dlat / len, midLng + offset * dlng / len];
+
+// Minimum safe distance from hazard (metres) — routes closer than this are rejected
+const HAZARD_BUFFER_M = 150;
+
+function computeDetourWaypoints(sLat, sLng, eLat, eLng, hLat, hLng, offset) {
+  // Returns TWO via-waypoints: one before and one after the hazard along the trail,
+  // both offset perpendicular to the trail on the opposite side of the hazard.
+  const trailDlat = eLat - sLat, trailDlng = eLng - sLng;
+  const trailLen = Math.sqrt(trailDlat ** 2 + trailDlng ** 2);
+  if (trailLen < 1e-7) return [[hLat + offset, hLng + offset]];
+
+  const tHatLat = trailDlat / trailLen, tHatLng = trailDlng / trailLen;
+  const perpLat = -tHatLng, perpLng = tHatLat;
+
+  const hazDlat = hLat - sLat, hazDlng = hLng - sLng;
+  const cross = trailDlat * hazDlng - trailDlng * hazDlat;
+  const sign = cross > 0 ? 1 : -1;
+
+  // Project hazard onto trail line (clamped)
+  const projT = (hazDlat * tHatLat + hazDlng * tHatLng) / trailLen;
+
+  // Two waypoints: ~30% of trail length before and after the hazard projection
+  const spread = 0.20;
+  const t1 = Math.max(0.10, projT - spread);
+  const t2 = Math.min(0.90, projT + spread);
+
+  const wp1Lat = sLat + t1 * trailDlat + sign * offset * perpLat;
+  const wp1Lng = sLng + t1 * trailDlng + sign * offset * perpLng;
+  const wp2Lat = sLat + t2 * trailDlat + sign * offset * perpLat;
+  const wp2Lng = sLng + t2 * trailDlng + sign * offset * perpLng;
+
+  return [[wp1Lat, wp1Lng], [wp2Lat, wp2Lng]];
 }
 
-// Client-side computation (same start/end, pick alt route farthest from hazard)
 async function computeClientSide(trailId, hazardLat, hazardLng) {
   const t = TRAIL_DB[trailId];
   if (!t) throw new Error(`Unknown trail ID: ${trailId}`);
 
+  // Fetch OSRM alternatives for the original route
   let routes = await osrmAlternatives(t.startLat, t.startLng, t.endLat, t.endLng);
-  const [vLat, vLng] = computeDetourPoint(t.startLat, t.startLng, t.endLat, t.endLng, hazardLat, hazardLng);
-  const viaRoute = await osrmViaRoute(t.startLat, t.startLng, vLat, vLng, t.endLat, t.endLng);
-  if (viaRoute) routes.push(viaRoute);
-
   if (!routes.length) throw new Error("Could not compute any route for this trail.");
-
   const original = routes[0];
+
+  // Try progressively larger offsets until we get a route that avoids the hazard
+  const offsets = [0.015, 0.025, 0.04];
+  for (const off of offsets) {
+    const waypoints = computeDetourWaypoints(
+      t.startLat, t.startLng, t.endLat, t.endLng, hazardLat, hazardLng, off
+    );
+    const viaRoute = await osrmViaRoute([
+      [t.startLat, t.startLng], ...waypoints, [t.endLat, t.endLng],
+    ]);
+    if (viaRoute) routes.push(viaRoute);
+  }
+
+  // Filter candidates: only keep routes whose closest point to hazard > HAZARD_BUFFER_M
+  const safe = routes.filter(
+    (r, i) => i === 0 || minDistToPath(hazardLat, hazardLng, r.path) > HAZARD_BUFFER_M
+  );
+
+  // Among safe alternatives (index > 0), pick the one farthest from hazard
   let alt = original;
-  if (routes.length >= 2) {
-    let best = -1;
-    for (let i = 1; i < routes.length; i++) {
-      const d = minDistToPath(hazardLat, hazardLng, routes[i].path);
-      if (d > best) { best = d; alt = routes[i]; }
-    }
+  let bestDist = -1;
+  const candidates = safe.length > 1 ? safe : routes; // fallback to all if none are safe
+  for (let i = 1; i < candidates.length; i++) {
+    const d = minDistToPath(hazardLat, hazardLng, candidates[i].path);
+    if (d > bestDist) { bestDist = d; alt = candidates[i]; }
   }
 
   return {
@@ -302,8 +396,8 @@ export default function AlternativeRoutePage() {
   const orig = data.originalRoute ?? {};
   const alt  = data.alternativeRoute ?? {};
 
-  const originalPath = (orig.path ?? []).map(p => [p[0], p[1]]);
-  const altPath      = (alt.path ?? []).map(p => [p[0], p[1]]);
+  const originalPath = cleanPath((orig.path ?? []).map(p => [p[0], p[1]]));
+  const altPath      = cleanPath((alt.path ?? []).map(p => [p[0], p[1]]));
 
   const origDistText = orig.distanceText ?? fmtDist(orig.distanceMetres ?? 0);
   const origTimeText = orig.durationText ?? fmtDuration(orig.durationSeconds ?? 0);
@@ -366,14 +460,14 @@ export default function AlternativeRoutePage() {
             <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
             <FitAll paths={allPaths} />
 
-            {/* Original route — solid green */}
+            {/* Original route — solid green, offset left */}
             {originalPath.length > 1 && (
-              <Polyline positions={originalPath} pathOptions={{ color: "#4ade80", opacity: 0.9, weight: 5 }} />
+              <Polyline positions={originalPath} pathOptions={{ color: "#4ade80", opacity: 0.9, weight: 3, offset: -3 }} />
             )}
 
-            {/* Alternative route — dotted cyan */}
+            {/* Alternative route — dotted cyan, offset right */}
             {altPath.length > 1 && (
-              <Polyline positions={altPath} pathOptions={{ color: "#22d3ee", opacity: 0.85, weight: 4, dashArray: "10 8" }} />
+              <Polyline positions={altPath} pathOptions={{ color: "#22d3ee", opacity: 0.85, weight: 3, offset: 3 }} />
             )}
 
             {/* Start marker — green */}
@@ -398,11 +492,11 @@ export default function AlternativeRoutePage() {
             <span className="text-xs text-muted">End</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#4ade80" strokeWidth="4" strokeOpacity="0.9" /></svg>
+            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#4ade80" strokeWidth="3" strokeOpacity="0.9" /></svg>
             <span className="text-xs text-muted">Original</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#22d3ee" strokeWidth="3" strokeDasharray="5 5" strokeOpacity="0.85" /></svg>
+            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#22d3ee" strokeWidth="3" strokeOpacity="0.85" /></svg>
             <span className="text-xs text-muted">Safer route</span>
           </div>
           <div className="flex items-center gap-1.5">
