@@ -133,13 +133,10 @@ async def _osrm_alternatives(client, s_lat, s_lng, e_lat, e_lng):
         return []
 
 
-async def _osrm_via_route(client, s_lat, s_lng, via_lat, via_lng, e_lat, e_lng):
-    """Fetch a walking route that passes through a via-waypoint (to force a detour)."""
-    url = (
-        f"{OSRM_BASE}/route/v1/foot/"
-        f"{s_lng},{s_lat};{via_lng},{via_lat};{e_lng},{e_lat}"
-        f"?overview=full&geometries=geojson"
-    )
+async def _osrm_via_route(client, waypoints):
+    """Fetch a walking route through multiple waypoints. waypoints: list of (lat, lng)."""
+    coords_str = ";".join(f"{lng},{lat}" for lat, lng in waypoints)
+    url = f"{OSRM_BASE}/route/v1/foot/{coords_str}?overview=full&geometries=geojson"
     try:
         resp = await client.get(url, timeout=TIMEOUT)
         data = resp.json()
@@ -157,34 +154,44 @@ async def _osrm_via_route(client, s_lat, s_lng, via_lat, via_lng, e_lat, e_lng):
         return None
 
 
-def _compute_detour_point(s_lat, s_lng, e_lat, e_lng, hazard_lat, hazard_lng):
+# Minimum safe distance from hazard (metres) — routes closer are rejected
+HAZARD_BUFFER_M = 150
+
+
+def _compute_detour_waypoints(s_lat, s_lng, e_lat, e_lng, hazard_lat, hazard_lng, offset):
     """
-    Compute a waypoint that is offset from the trail midpoint, away from the hazard.
-    This forces OSRM to route around the hazard side.
+    Compute TWO via-waypoints that bracket the hazard along the trail,
+    offset perpendicular on the opposite side. This forces OSRM to route
+    entirely around the hazard zone rather than cutting through it.
     """
-    mid_lat = (s_lat + e_lat) / 2
-    mid_lng = (s_lng + e_lng) / 2
+    trail_dlat = e_lat - s_lat
+    trail_dlng = e_lng - s_lng
+    trail_len = math.sqrt(trail_dlat ** 2 + trail_dlng ** 2)
 
-    # Vector from hazard to midpoint
-    dlat = mid_lat - hazard_lat
-    dlng = mid_lng - hazard_lng
-    length = math.sqrt(dlat ** 2 + dlng ** 2)
+    if trail_len < 1e-7:
+        return [(hazard_lat + offset, hazard_lng + offset)]
 
-    if length < 1e-7:
-        # Hazard is at midpoint — offset perpendicular to the trail direction
-        trail_dlat = e_lat - s_lat
-        trail_dlng = e_lng - s_lng
-        perp_lat = -trail_dlng
-        perp_lng = trail_dlat
-        plength = math.sqrt(perp_lat ** 2 + perp_lng ** 2)
-        if plength < 1e-7:
-            return mid_lat + 0.012, mid_lng + 0.012
-        offset = 0.015
-        return mid_lat + offset * perp_lat / plength, mid_lng + offset * perp_lng / plength
+    t_hat_lat = trail_dlat / trail_len
+    t_hat_lng = trail_dlng / trail_len
+    perp_lat = -t_hat_lng
+    perp_lng = t_hat_lat
 
-    # Push the waypoint away from the hazard (0.015° ≈ 1.5km in SG)
-    offset = 0.015
-    return mid_lat + offset * dlat / length, mid_lng + offset * dlng / length
+    haz_dlat = hazard_lat - s_lat
+    haz_dlng = hazard_lng - s_lng
+    cross = trail_dlat * haz_dlng - trail_dlng * haz_dlat
+    sign = 1 if cross > 0 else -1
+
+    proj_t = (haz_dlat * t_hat_lat + haz_dlng * t_hat_lng) / trail_len
+
+    spread = 0.20
+    t1 = max(0.10, proj_t - spread)
+    t2 = min(0.90, proj_t + spread)
+
+    wp1 = (s_lat + t1 * trail_dlat + sign * offset * perp_lat,
+            s_lng + t1 * trail_dlng + sign * offset * perp_lng)
+    wp2 = (s_lat + t2 * trail_dlat + sign * offset * perp_lat,
+            s_lng + t2 * trail_dlng + sign * offset * perp_lng)
+    return [wp1, wp2]
 
 
 def _fmt_distance(metres):
@@ -240,35 +247,46 @@ async def get_alternative_route(req: AlternativeRouteRequest):
         routes = await _osrm_alternatives(client, s_lat, s_lng, e_lat, e_lng)
         log.info("OSRM returned %d route(s)", len(routes))
 
-        # ── 3. Also compute a via-waypoint route that detours around hazard ───
-        via_lat, via_lng = _compute_detour_point(s_lat, s_lng, e_lat, e_lng, req.hazardLat, req.hazardLng)
-        log.info("Step 3 – Computing via-waypoint detour through (%s,%s)", round(via_lat, 5), round(via_lng, 5))
-        via_route = await _osrm_via_route(client, s_lat, s_lng, via_lat, via_lng, e_lat, e_lng)
-        if via_route:
-            routes.append(via_route)
-            log.info("Via-route added: %s, %s",
-                     _fmt_distance(via_route["distanceMetres"]),
-                     _fmt_duration(via_route["durationSeconds"]))
+        # ── 3. Compute via-waypoint detour routes at progressively larger offsets ─
+        log.info("Step 3 – Computing detour routes around hazard")
+        for offset in [0.015, 0.025, 0.04]:
+            waypoints = _compute_detour_waypoints(
+                s_lat, s_lng, e_lat, e_lng, req.hazardLat, req.hazardLng, offset
+            )
+            all_wps = [(s_lat, s_lng)] + waypoints + [(e_lat, e_lng)]
+            log.info("  offset=%.3f° via %s", offset,
+                     [f"({w[0]:.5f},{w[1]:.5f})" for w in waypoints])
+            via_route = await _osrm_via_route(client, all_wps)
+            if via_route:
+                routes.append(via_route)
+                log.info("  → added route: %s, %s (min hazard dist: %dm)",
+                         _fmt_distance(via_route["distanceMetres"]),
+                         _fmt_duration(via_route["durationSeconds"]),
+                         round(_min_dist_to_path(req.hazardLat, req.hazardLng, via_route["path"])))
 
         if len(routes) < 1:
             raise HTTPException(status_code=404, detail="OSRM could not compute any route for this trail.")
 
-        # ── 4. Original = first route; Alternative = farthest from hazard ─────
+        # ── 4. Original = first route; Alternative = farthest from hazard that clears buffer ─
         original_route = routes[0]
 
-        if len(routes) >= 2:
-            # Score each candidate by minimum distance from hazard
+        # Filter to routes that stay outside the hazard buffer zone
+        safe = [r for r in routes[1:]
+                if _min_dist_to_path(req.hazardLat, req.hazardLng, r["path"]) > HAZARD_BUFFER_M]
+        candidates = safe if safe else routes[1:]  # fallback to all if none clear buffer
+
+        if candidates:
             scored = []
-            for i, r in enumerate(routes[1:], start=1):
+            for i, r in enumerate(candidates):
                 min_d = _min_dist_to_path(req.hazardLat, req.hazardLng, r["path"])
                 scored.append((min_d, i, r))
             scored.sort(key=lambda x: -x[0])  # farthest first
             alt_route = scored[0][2]
-            log.info("Picked alternative route #%d (min hazard dist: %dm, dist: %s)",
-                     scored[0][1], round(scored[0][0]),
-                     _fmt_distance(alt_route["distanceMetres"]))
+            log.info("Picked alternative (min hazard dist: %dm, dist: %s, safe=%s)",
+                     round(scored[0][0]),
+                     _fmt_distance(alt_route["distanceMetres"]),
+                     bool(safe))
         else:
-            # Only one route returned — use via-waypoint fallback
             alt_route = original_route
             log.warning("Only 1 route available — alternative = original")
 

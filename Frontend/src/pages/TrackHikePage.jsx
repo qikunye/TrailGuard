@@ -86,8 +86,8 @@ const COND_SEV_COLOR = (s = "") => {
   return "text-primary bg-primary/10 border-primary/20";
 };
 
-// ── Active trail hazards (from Trail Condition Service /Condition/{id}) ────────
-function TrailHazards({ trailId }) {
+// ── Active trail hazards (from Trail Condition Service + user-reported) ────────
+function TrailHazards({ trailId, uid }) {
   const [condition, setCondition] = useState(null);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState(null);
@@ -103,6 +103,18 @@ function TrailHazards({ trailId }) {
       .finally(() => setLoading(false));
   }, [trailId]);
 
+  // Read user-reported hazards from localStorage (last 24 hours, matching this trail)
+  const reportedHazards = (() => {
+    if (!uid || !trailId) return [];
+    try {
+      const all = JSON.parse(localStorage.getItem(`reportedHazards_${uid}`) ?? "[]");
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      return all.filter(
+        h => String(h.trailId) === String(trailId) && new Date(h.reportedAt).getTime() >= cutoff
+      );
+    } catch { return []; }
+  })();
+
   if (!trailId) return null;
   if (loading) return (
     <div className="mt-6 flex items-center gap-2 text-xs text-muted px-1">
@@ -116,45 +128,77 @@ function TrailHazards({ trailId }) {
   const hazardTypes  = condition?.hazardTypes ?? [];
   const opStatus     = condition?.operationalStatus ?? "";
 
+  const totalCount = activeCount + reportedHazards.length;
+  const hasAny = totalCount > 0;
+
   return (
     <div className="mt-6">
       <p className="text-xs text-muted uppercase tracking-widest mb-3">Active Hazards on This Trail</p>
-      {error ? (
+      {error && !reportedHazards.length ? (
         <p className="text-xs text-muted px-1">Could not load — {error}</p>
-      ) : !condition || activeCount === 0 ? (
+      ) : !hasAny ? (
         <div className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5 flex items-center gap-3">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
           <p className="text-sm text-muted">No active hazards on this trail.</p>
         </div>
       ) : (
-        <div className="bg-white/[0.03] border border-amber/20 rounded-2xl px-4 py-3.5">
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-fg">{activeCount} active hazard{activeCount !== 1 ? "s" : ""}</span>
-              {highestSev !== "none" && (
-                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${COND_SEV_COLOR(highestSev)}`}>
-                  Highest: {highestSev}
-                </span>
+        <div className="flex flex-col gap-2">
+          {/* Static trail condition hazards */}
+          {activeCount > 0 && (
+            <div className="bg-white/[0.03] border border-amber/20 rounded-2xl px-4 py-3.5">
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-semibold text-fg">{activeCount} trail condition hazard{activeCount !== 1 ? "s" : ""}</span>
+                  {highestSev !== "none" && (
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${COND_SEV_COLOR(highestSev)}`}>
+                      Highest: {highestSev}
+                    </span>
+                  )}
+                  {opStatus && opStatus !== "open" && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border text-amber bg-amber/10 border-amber/20 uppercase">
+                      {opStatus}
+                    </span>
+                  )}
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              {hazardTypes.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {hazardTypes.map((t, i) => (
+                    <span key={i} className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-muted capitalize">
+                      {t.replace(/_/g, " ")}
+                    </span>
+                  ))}
+                </div>
               )}
-              {opStatus && opStatus !== "open" && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border text-amber bg-amber/10 border-amber/20 uppercase">
-                  {opStatus}
-                </span>
-              )}
-            </div>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-          </div>
-          {hazardTypes.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {hazardTypes.map((t, i) => (
-                <span key={i} className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-muted capitalize">
-                  {t.replace(/_/g, " ")}
-                </span>
-              ))}
             </div>
           )}
+
+          {/* User-reported hazards */}
+          {reportedHazards.map((h) => (
+            <div key={h.id} className="bg-white/[0.03] border border-amber/20 rounded-2xl px-4 py-3.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <p className="text-sm font-semibold text-fg">{h.hazardType}</p>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_COLOR(h.severity)}`}>
+                      {SEVERITY_LABELS[h.severity] ?? `Severity ${h.severity}`}
+                    </span>
+                  </div>
+                  {h.description && <p className="text-xs text-muted truncate mb-1">{h.description}</p>}
+                  {h.locationDescription && (
+                    <p className="text-xs text-muted/70 truncate mb-1">{h.locationDescription}</p>
+                  )}
+                  <p className="text-xs text-muted font-mono">
+                    {h.reportedAt ? new Date(h.reportedAt).toLocaleString("en-SG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                  </p>
+                </div>
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 block shrink-0 mt-0.5" title="Reported hazard" />
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -901,7 +945,7 @@ export default function TrackHikePage() {
         {status === "tracking" && selectedHike?.selectedTrailId && (
           <>
             <TrailIncidents trailId={selectedHike.selectedTrailId} />
-            <TrailHazards   trailId={selectedHike.selectedTrailId} />
+            <TrailHazards   trailId={selectedHike.selectedTrailId} uid={uid} />
           </>
         )}
 
