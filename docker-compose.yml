@@ -131,8 +131,6 @@ services:
       - weather-wrapper
       - evaluator-wrapper
       - googlemaps-wrapper
-      - emergencynotif-wrapper
-      - alternative-route-service
     networks:
       - trailguard
 
