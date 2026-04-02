@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { Link, useLocation } from "react-router-dom";
 import Navbar from "../components/shared/Navbar.jsx";
 import HikeRouteMap from "../components/map/HikeRouteMap.jsx";
 import { useAssessment, deriveExpLevel } from "../hooks/useAssessment.js";
@@ -16,16 +16,174 @@ const wrap = "flex items-center bg-surface border border-line rounded-full px-4 
 const inp  = "flex-1 bg-transparent border-none outline-none text-fg text-[0.9rem] py-3 font-[inherit] placeholder:text-muted min-w-0";
 const lbl  = "block text-[0.82rem] font-semibold tracking-[0.04em] text-fg mb-1.5 font-mono";
 
+// ── Hardcoded trail distance / duration (matches Recommended Trails on dashboard) ─
+const TRAIL_META = {
+  "1":  { distanceText: "9 km",    durationText: "3 hr",       estimatedDuration: "3.0" },
+  "2":  { distanceText: "11 km",   durationText: "3 hr 30 min", estimatedDuration: "3.5" },
+  "3":  { distanceText: "6 km",    durationText: "2 hr 30 min", estimatedDuration: "2.5" },
+  "4":  { distanceText: "3.5 km",  durationText: "1 hr 30 min", estimatedDuration: "1.5" },
+  "5":  { distanceText: "7 km",    durationText: "2 hr 30 min", estimatedDuration: "2.5" },
+  "6":  { distanceText: "3 km",    durationText: "1 hr 30 min", estimatedDuration: "1.5" },
+  "7":  { distanceText: "5 km",    durationText: "2 hr",       estimatedDuration: "2.0" },
+  "8":  { distanceText: "4.5 km",  durationText: "1 hr 45 min", estimatedDuration: "1.75" },
+  "9":  { distanceText: "4 km",    durationText: "1 hr 30 min", estimatedDuration: "1.5" },
+  "10": { distanceText: "5.5 km",  durationText: "2 hr",       estimatedDuration: "2.0" },
+};
+
 // ── Static fallback if backend is unreachable ─────────────────────────────────
 const FALLBACK_TRAILS = [
-  { trailId: "1", trailName: "Southern Ridges Loop",       difficulty: "Easy",     operationalStatus: "OPEN",
-    startPoint: "1.2644, 103.8208", endPoint: "1.2895, 103.8043" },
-  { trailId: "2", trailName: "MacRitchie Reservoir Trail", difficulty: "Moderate", operationalStatus: "OPEN",
-    startPoint: "1.3442, 103.8197", endPoint: "1.3592, 103.8320" },
+  { trailId: "1",  trailName: "Southern Ridges Loop",          difficulty: "Easy",     operationalStatus: "OPEN",    startPoint: "1.2644, 103.8208", endPoint: "1.2895, 103.8043" },
+  { trailId: "2",  trailName: "MacRitchie Reservoir Trail",    difficulty: "Moderate", operationalStatus: "OPEN",    startPoint: "1.3442, 103.8197", endPoint: "1.3592, 103.8320" },
+  { trailId: "3",  trailName: "Bukit Timah Summit Trail",      difficulty: "Hard",     operationalStatus: "OPEN",    startPoint: "1.3511, 103.7761", endPoint: "1.3468, 103.7738" },
+  { trailId: "4",  trailName: "Labrador Nature Reserve Trail", difficulty: "Easy",     operationalStatus: "OPEN",    startPoint: "1.2627, 103.8030", endPoint: "1.2706, 103.8083" },
+  { trailId: "5",  trailName: "Sungei Buloh Wetland Walk",     difficulty: "Easy",     operationalStatus: "OPEN",    startPoint: "1.4467, 103.7240", endPoint: "1.4514, 103.7304" },
+  { trailId: "6",  trailName: "Bukit Batok Nature Park Loop",  difficulty: "Easy",     operationalStatus: "OPEN",    startPoint: "1.3479, 103.7601", endPoint: "1.3504, 103.7635" },
+  { trailId: "7",  trailName: "Pulau Ubin Chek Jawa Trail",    difficulty: "Easy",     operationalStatus: "OPEN",    startPoint: "1.4044, 103.9592", endPoint: "1.4002, 103.9671" },
+  { trailId: "8",  trailName: "Kent Ridge Park Trail",         difficulty: "Moderate", operationalStatus: "OPEN",    startPoint: "1.2960, 103.7836", endPoint: "1.2875, 103.7880" },
+  { trailId: "9",  trailName: "Admiralty Park Mangrove Trail", difficulty: "Easy",     operationalStatus: "CAUTION", startPoint: "1.4406, 103.7990", endPoint: "1.4451, 103.8032" },
+  { trailId: "10", trailName: "Clementi Forest Trail",         difficulty: "Moderate", operationalStatus: "OPEN",    startPoint: "1.3243, 103.7682", endPoint: "1.3299, 103.7748" },
 ];
+
+// ── Difficulty + status badges ────────────────────────────────────────────────
+function DiffBadge({ difficulty }) {
+  const map = {
+    Easy:     "text-primary bg-primary/10 border-primary/20",
+    Moderate: "text-amber-400 bg-amber-400/10 border-amber-400/20",
+    Hard:     "text-red-400 bg-red-400/10 border-red-400/20",
+  };
+  return (
+    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${map[difficulty] ?? "text-muted bg-white/5 border-white/10"}`}>
+      {difficulty}
+    </span>
+  );
+}
+
+function StatusBadge({ status }) {
+  const s = (status ?? "").toUpperCase();
+  if (s === "CLOSED")  return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border text-red-400 bg-red-400/10 border-red-400/20 shrink-0">CLOSED</span>;
+  if (s === "CAUTION") return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border text-amber-400 bg-amber-400/10 border-amber-400/20 shrink-0">CAUTION</span>;
+  return null; // OPEN — no badge needed
+}
+
+// ── Custom trail dropdown ─────────────────────────────────────────────────────
+function TrailDropdown({ trails, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState(null);
+  const triggerRef = useRef(null);
+  const listRef    = useRef(null);
+  const selected = trails.find(t => t.trailId === value);
+
+  // Recalculate trigger position whenever the list opens
+  useEffect(() => {
+    if (!open) return;
+    const r = triggerRef.current?.getBoundingClientRect();
+    if (r) setRect(r);
+    const h = (e) => {
+      // Close only when clicking outside BOTH the trigger and the floating list
+      if (
+        !triggerRef.current?.contains(e.target) &&
+        !listRef.current?.contains(e.target)
+      ) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  // Keep rect in sync on scroll / resize while open
+  useEffect(() => {
+    if (!open) return;
+    const update = () => {
+      const r = triggerRef.current?.getBoundingClientRect();
+      if (r) setRect(r);
+    };
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open]);
+
+  return (
+    <div>
+      {/* Trigger button */}
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className={`w-full flex items-center gap-3 bg-surface border rounded-2xl px-4 py-3.5 text-left transition-all cursor-pointer outline-none ${
+          open ? "border-primary ring-2 ring-primary/20" : "border-line hover:border-white/20"
+        }`}
+      >
+        {selected ? (
+          <>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-fg truncate">{selected.trailName}</p>
+            </div>
+            <DiffBadge difficulty={selected.difficulty} />
+            <StatusBadge status={selected.operationalStatus} />
+          </>
+        ) : (
+          <span className="text-sm text-muted flex-1">— Choose a trail —</span>
+        )}
+        <svg
+          width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          className={`text-muted shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+        >
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </button>
+
+      {/* Options list — fixed so it escapes any parent stacking context */}
+      {open && rect && (
+        <div
+          ref={listRef}
+          style={{
+            position: "fixed",
+            top: rect.bottom + 6,
+            left: rect.left,
+            width: rect.width,
+            maxHeight: 320,
+            overflowY: "auto",
+            zIndex: 9999,
+          }}
+          className="bg-black/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+        >
+          {trails.map((t, i) => {
+            const isSelected = t.trailId === value;
+            return (
+              <button
+                type="button"
+                key={t.trailId}
+                onClick={() => { onChange(t.trailId); setOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors cursor-pointer border-none outline-none ${
+                  isSelected ? "bg-primary/10" : "bg-transparent hover:bg-white/5"
+                } ${i !== 0 ? "border-t border-white/[0.04]" : ""}`}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-semibold truncate ${isSelected ? "text-primary" : "text-fg"}`}>
+                    {t.trailName}
+                  </p>
+                </div>
+                <DiffBadge difficulty={t.difficulty} />
+                <StatusBadge status={t.operationalStatus} />
+                {isSelected && (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                    <path d="M20 6L9 17l-5-5"/>
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function TrailRegistrationPage() {
+  const location = useLocation();
   const { assess, loading: checkLoading, error: checkError } = useAssessment();
   const [assessment,  setAssessment]  = useState(null);
   const [showModal,   setShowModal]   = useState(false);
@@ -42,7 +200,7 @@ export default function TrailRegistrationPage() {
 
   const [form, setForm] = useState({
     // Trail selection — must map to a known trailId for the evaluator to work
-    selectedTrailId:   "",
+    selectedTrailId:   location.state?.trailId ?? "",
     // Map route (visualization only)
     startLocation:     "",
     endLocation:       "",
@@ -66,10 +224,12 @@ export default function TrailRegistrationPage() {
   const selectedTrail = trails.find(t => t.trailId === form.selectedTrailId);
 
   function handleRouteReady({ startName, endName, distanceText, durationText, durationSeconds, startLat, startLng, endLat, endLng, path }) {
+    const meta = TRAIL_META[form.selectedTrailId];
     setForm(f => ({
       ...f, startLocation: startName, endLocation: endName,
-      distanceText, durationText,
-      estimatedDuration: (durationSeconds / 3600).toFixed(1),
+      distanceText:      meta?.distanceText      ?? distanceText,
+      durationText:      meta?.durationText      ?? durationText,
+      estimatedDuration: meta?.estimatedDuration ?? (durationSeconds / 3600).toFixed(1),
       startLat, startLng, endLat, endLng, path,
     }));
   }
@@ -163,18 +323,12 @@ export default function TrailRegistrationPage() {
             <label className={lbl}>
               Trail <span className="text-red-400/70 font-normal">(required)</span>
             </label>
-            <div className={`${wrap} pr-4 mb-3`}>
-              <select value={form.selectedTrailId}
-                onChange={e => setForm(f => ({ ...f, selectedTrailId: e.target.value }))}
-                className="flex-1 bg-transparent border-none outline-none text-fg text-[0.9rem] py-3 cursor-pointer">
-                <option value="" className="bg-card">— Choose a trail —</option>
-                {trails.map(t => (
-                  <option key={t.trailId} value={t.trailId} className="bg-card">
-                    {t.trailName} · {t.difficulty}
-                    {t.operationalStatus === "CLOSED" ? " · CLOSED" : t.operationalStatus === "CAUTION" ? " · CAUTION" : ""}
-                  </option>
-                ))}
-              </select>
+            <div className="mb-3">
+              <TrailDropdown
+                trails={trails}
+                value={form.selectedTrailId}
+                onChange={id => setForm(f => ({ ...f, selectedTrailId: id }))}
+              />
             </div>
 
             {/* Trail detail chips + hiker context — shown after selection */}
@@ -222,6 +376,8 @@ export default function TrailRegistrationPage() {
                 onRouteReady={handleRouteReady}
                 onStartChange={name => setForm(f => ({ ...f, startLocation: name }))}
                 onEndChange={name   => setForm(f => ({ ...f, endLocation:   name }))}
+                distanceText={TRAIL_META[form.selectedTrailId]?.distanceText}
+                durationText={TRAIL_META[form.selectedTrailId]?.durationText}
               />
             </div>
           )}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, Polyline, CircleMarker, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -40,7 +40,7 @@ function minDistToPath(lat, lng, path) {
 }
 
 async function osrmAlternatives(sLat, sLng, eLat, eLng) {
-  const url = `https://router.project-osrm.org/route/v1/foot/${sLng},${sLat};${eLng},${eLat}?overview=full&geometries=geojson&alternatives=3`;
+  const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${sLng},${sLat};${eLng},${eLat}?overview=full&geometries=geojson&alternatives=3`;
   const res = await fetch(url);
   const data = await res.json();
   if (data.code !== "Ok" || !data.routes?.length) return [];
@@ -51,7 +51,7 @@ async function osrmAlternatives(sLat, sLng, eLat, eLng) {
   }));
 }
 async function osrmViaRoute(sLat, sLng, vLat, vLng, eLat, eLng) {
-  const url = `https://router.project-osrm.org/route/v1/foot/${sLng},${sLat};${vLng},${vLat};${eLng},${eLat}?overview=full&geometries=geojson`;
+  const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${sLng},${sLat};${vLng},${vLat};${eLng},${eLat}?overview=full&geometries=geojson`;
   const res = await fetch(url);
   const data = await res.json();
   if (data.code !== "Ok" || !data.routes?.length) return null;
@@ -154,6 +154,54 @@ export default function AlternativeRoutePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
   const { uid } = useProfile();
+  const navigate = useNavigate();
+
+  function handleAcceptRoute() {
+    if (!data) { navigate("/dashboard"); return; }
+
+    const newPath    = data.alternativeRoute?.path ?? [];
+    const altDistText = data.alternativeRoute?.distanceText;
+
+    if (uid) {
+      // 1. Save alt route record for banner display on dashboard + track hike
+      localStorage.setItem(`altRoute_${uid}`, JSON.stringify({
+        ...data,
+        acceptedAt: new Date().toISOString(),
+      }));
+
+      // 2. Update upcomingHike path so dashboard map shows the new route
+      try {
+        const upcoming = JSON.parse(localStorage.getItem(`upcomingHike_${uid}`));
+        if (upcoming) {
+          upcoming.path = newPath;
+          if (altDistText) upcoming.distanceText = altDistText;
+          localStorage.setItem(`upcomingHike_${uid}`, JSON.stringify(upcoming));
+        }
+      } catch { /* ignore */ }
+
+      // 3. Update the matching registered hike so TrackHike uses the new path
+      try {
+        const hikes = JSON.parse(localStorage.getItem(`registeredHikes_${uid}`)) ?? [];
+        const updated = hikes.map(h =>
+          String(h.selectedTrailId) === String(data.trailId)
+            ? { ...h, path: newPath, ...(altDistText ? { distanceText: altDistText } : {}) }
+            : h
+        );
+        localStorage.setItem(`registeredHikes_${uid}`, JSON.stringify(updated));
+      } catch { /* ignore */ }
+
+      // 4. Update active track if hike is currently in progress
+      try {
+        const active = JSON.parse(localStorage.getItem(`activeTrack_${uid}`));
+        if (active?.selectedHike && String(active.selectedHike.selectedTrailId) === String(data.trailId)) {
+          active.selectedHike = { ...active.selectedHike, path: newPath };
+          localStorage.setItem(`activeTrack_${uid}`, JSON.stringify(active));
+        }
+      } catch { /* ignore */ }
+    }
+
+    navigate("/dashboard");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -391,11 +439,10 @@ export default function AlternativeRoutePage() {
 
         {/* ── Actions ── */}
         <div className="flex gap-3">
-          <Link to="/dashboard" className="flex-1 no-underline">
-            <button className="w-full py-3.5 px-4 bg-primary text-bg rounded-full text-[0.95rem] font-bold cursor-pointer transition-all hover:opacity-90 border-none">
-              Accept Route
-            </button>
-          </Link>
+          <button onClick={handleAcceptRoute}
+            className="flex-1 py-3.5 px-4 bg-primary text-bg rounded-full text-[0.95rem] font-bold cursor-pointer transition-all hover:opacity-90 border-none">
+            Accept Route
+          </button>
           <Link to="/hazard" className="flex-1 no-underline">
             <button className="w-full py-3.5 px-4 bg-transparent border border-line text-muted rounded-full text-[0.95rem] font-semibold cursor-pointer transition-colors hover:border-primary hover:text-fg">
               Back

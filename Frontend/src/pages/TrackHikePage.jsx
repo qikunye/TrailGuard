@@ -5,7 +5,161 @@ import Navbar from "../components/shared/Navbar.jsx";
 import { useProfile } from "../hooks/useProfile.js";
 import { kongFetch } from "../lib/kongClient.js";
 
-const HIKE_URL = import.meta.env.VITE_HIKE_URL ?? "http://localhost:8080/api/completed";
+const HIKE_URL             = import.meta.env.VITE_HIKE_URL             ?? "http://localhost:8080/api/completed";
+const INCIDENT_URL         = import.meta.env.VITE_INCIDENT_URL         ?? "http://localhost:8080/api/incident";
+const TRAIL_CONDITION_URL  = import.meta.env.VITE_TRAIL_CONDITION_URL  ?? "http://localhost:8080/api/trail";
+
+const SEVERITY_LABELS = { 1: "Minor", 2: "Moderate", 3: "Serious", 4: "Critical", 5: "Fatal" };
+const SEVERITY_COLOR  = (s) => s >= 4 ? "text-red bg-red/10 border-red/20" : s >= 3 ? "text-amber bg-amber/10 border-amber/20" : "text-primary bg-primary/10 border-primary/20";
+
+// ── Active trail incidents (last 24 h from Firebase) ─────────────────────────
+function TrailIncidents({ trailId }) {
+  const [incidents, setIncidents] = useState([]);
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState(null);
+
+  useEffect(() => {
+    if (!trailId) return;
+    setLoading(true);
+    setError(null);
+    kongFetch(`${INCIDENT_URL}/incidents/trail/${trailId}/active`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(data => {
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        setIncidents((data.incidents ?? []).filter(
+          inc => inc.reportedAt && new Date(inc.reportedAt).getTime() >= cutoff
+        ));
+      })
+      .catch(err => { console.error("[TrailIncidents]", err); setError(err.message); })
+      .finally(() => setLoading(false));
+  }, [trailId]);
+
+  if (!trailId) return null;
+  if (loading) return (
+    <div className="mt-6 flex items-center gap-2 text-xs text-muted px-1">
+      <div className="w-3 h-3 border border-muted border-t-transparent rounded-full animate-spin" />
+      Loading trail incidents…
+    </div>
+  );
+
+  return (
+    <div className="mt-6">
+      <p className="text-xs text-muted uppercase tracking-widest mb-3">Active Hike Incidents on This Trail</p>
+      {error ? (
+        <p className="text-xs text-muted px-1">Could not load — {error}</p>
+      ) : incidents.length === 0 ? (
+        <p className="text-xs text-muted px-1">No incidents reported in the last 24 hours.</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {incidents.map((inc) => (
+            <div key={inc.incidentId ?? inc.id} className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <p className="text-sm font-semibold text-fg">{inc.injuryType}</p>
+                    {inc.severity && (
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_COLOR(inc.severity)}`}>
+                        {SEVERITY_LABELS[inc.severity] ?? `Severity ${inc.severity}`}
+                      </span>
+                    )}
+                  </div>
+                  {inc.description && <p className="text-xs text-muted truncate mb-1">{inc.description}</p>}
+                  <p className="text-xs text-muted font-mono">
+                    {inc.reportedAt ? new Date(inc.reportedAt).toLocaleString("en-SG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                  </p>
+                </div>
+                <span className="w-2.5 h-2.5 rounded-full bg-red block shrink-0 mt-0.5" title="Incident" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Severity label/colour for the string severities the condition API returns
+const COND_SEV_COLOR = (s = "") => {
+  const v = s.toLowerCase();
+  if (v === "critical" || v === "severe") return "text-red bg-red/10 border-red/20";
+  if (v === "moderate")                   return "text-amber bg-amber/10 border-amber/20";
+  return "text-primary bg-primary/10 border-primary/20";
+};
+
+// ── Active trail hazards (from Trail Condition Service /Condition/{id}) ────────
+function TrailHazards({ trailId }) {
+  const [condition, setCondition] = useState(null);
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState(null);
+
+  useEffect(() => {
+    if (!trailId) return;
+    setLoading(true);
+    setError(null);
+    kongFetch(`${TRAIL_CONDITION_URL}/Condition/${trailId}`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(data => setCondition(data))
+      .catch(err => { console.error("[TrailHazards]", err); setError(err.message); })
+      .finally(() => setLoading(false));
+  }, [trailId]);
+
+  if (!trailId) return null;
+  if (loading) return (
+    <div className="mt-6 flex items-center gap-2 text-xs text-muted px-1">
+      <div className="w-3 h-3 border border-muted border-t-transparent rounded-full animate-spin" />
+      Loading trail hazards…
+    </div>
+  );
+
+  const activeCount  = condition?.activeHazardCounts ?? 0;
+  const highestSev   = condition?.highestSeverity ?? "none";
+  const hazardTypes  = condition?.hazardTypes ?? [];
+  const opStatus     = condition?.operationalStatus ?? "";
+
+  return (
+    <div className="mt-6">
+      <p className="text-xs text-muted uppercase tracking-widest mb-3">Active Hazards on This Trail</p>
+      {error ? (
+        <p className="text-xs text-muted px-1">Could not load — {error}</p>
+      ) : !condition || activeCount === 0 ? (
+        <div className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5 flex items-center gap-3">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
+          <p className="text-sm text-muted">No active hazards on this trail.</p>
+        </div>
+      ) : (
+        <div className="bg-white/[0.03] border border-amber/20 rounded-2xl px-4 py-3.5">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-fg">{activeCount} active hazard{activeCount !== 1 ? "s" : ""}</span>
+              {highestSev !== "none" && (
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${COND_SEV_COLOR(highestSev)}`}>
+                  Highest: {highestSev}
+                </span>
+              )}
+              {opStatus && opStatus !== "open" && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border text-amber bg-amber/10 border-amber/20 uppercase">
+                  {opStatus}
+                </span>
+              )}
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          {hazardTypes.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {hazardTypes.map((t, i) => (
+                <span key={i} className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-muted capitalize">
+                  {t.replace(/_/g, " ")}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Haversine distance in metres ──────────────────────────────────────────────
 function haversine([lat1, lng1], [lat2, lng2]) {
@@ -67,13 +221,19 @@ function AutoPan({ pos }) {
 }
 
 // ── Map component ──────────────────────────────────────────────────────────────
-function TrackMap({ plannedPath, trackedPath, currentPos }) {
+function TrackMap({ plannedPath, trackedPath, currentPos, hazardPos, altOriginalPath, altPath }) {
   const center = currentPos
     || (plannedPath.length > 0 ? plannedPath[0] : null)
     || [1.3521, 103.8198];
 
+  const hasAlt    = altPath && altPath.length > 1;
   const planStart = plannedPath[0] ?? null;
   const planEnd   = plannedPath[plannedPath.length - 1] ?? null;
+
+  // Fit bounds to alt paths when alternative route is active
+  const fitPath = hasAlt
+    ? [...(altOriginalPath ?? []), ...altPath]
+    : plannedPath;
 
   return (
     <MapContainer
@@ -89,36 +249,72 @@ function TrackMap({ plannedPath, trackedPath, currentPos }) {
         attribution=""
       />
 
-      {/* Fit the whole planned route into view on first render */}
-      {plannedPath.length > 1 && <FitBounds path={plannedPath} />}
+      {/* Fit the whole route into view on first render */}
+      {fitPath.length > 1 && <FitBounds path={fitPath} />}
 
-      {/* Planned route – faint dashed */}
-      {plannedPath.length > 1 && (
-        <Polyline
-          positions={plannedPath}
-          pathOptions={{ color: "#ffffff", opacity: 0.25, weight: 3, dashArray: "6 6" }}
-        />
+      {/* ── Alternative route mode ── */}
+      {hasAlt ? (
+        <>
+          {/* Original route — faint green */}
+          {altOriginalPath && altOriginalPath.length > 1 && (
+            <Polyline
+              positions={altOriginalPath}
+              pathOptions={{ color: "#4ade80", opacity: 0.35, weight: 3, dashArray: "6 6" }}
+            />
+          )}
+          {/* Alternative route — solid cyan */}
+          <Polyline
+            positions={altPath}
+            pathOptions={{ color: "#22d3ee", opacity: 0.9, weight: 5 }}
+          />
+          {/* Start marker */}
+          {altPath[0] && (
+            <CircleMarker
+              center={altPath[0]}
+              radius={7}
+              pathOptions={{ color: "#22d3ee", fillColor: "#22d3ee", fillOpacity: 1, weight: 2 }}
+            />
+          )}
+          {/* End marker */}
+          {altPath[altPath.length - 1] && (
+            <CircleMarker
+              center={altPath[altPath.length - 1]}
+              radius={7}
+              pathOptions={{ color: "#f87171", fillColor: "#f87171", fillOpacity: 1, weight: 2 }}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {/* Planned route – faint dashed */}
+          {plannedPath.length > 1 && (
+            <Polyline
+              positions={plannedPath}
+              pathOptions={{ color: "#ffffff", opacity: 0.25, weight: 3, dashArray: "6 6" }}
+            />
+          )}
+
+          {/* Planned start marker – white ring */}
+          {planStart && (
+            <CircleMarker
+              center={planStart}
+              radius={6}
+              pathOptions={{ color: "#fff", fillColor: "#fff", fillOpacity: 0.9, weight: 2 }}
+            />
+          )}
+
+          {/* Planned end marker – white filled */}
+          {planEnd && planEnd !== planStart && (
+            <CircleMarker
+              center={planEnd}
+              radius={6}
+              pathOptions={{ color: "#fff", fillColor: "#333", fillOpacity: 1, weight: 2 }}
+            />
+          )}
+        </>
       )}
 
-      {/* Planned start marker – white ring */}
-      {planStart && (
-        <CircleMarker
-          center={planStart}
-          radius={6}
-          pathOptions={{ color: "#fff", fillColor: "#fff", fillOpacity: 0.9, weight: 2 }}
-        />
-      )}
-
-      {/* Planned end marker – white filled */}
-      {planEnd && planEnd !== planStart && (
-        <CircleMarker
-          center={planEnd}
-          radius={6}
-          pathOptions={{ color: "#fff", fillColor: "#333", fillOpacity: 1, weight: 2 }}
-        />
-      )}
-
-      {/* Tracked path – bright green */}
+      {/* Tracked path – always shown (green) */}
       {trackedPath.length > 1 && (
         <Polyline
           positions={trackedPath}
@@ -147,6 +343,22 @@ function TrackMap({ plannedPath, trackedPath, currentPos }) {
             center={currentPos}
             radius={7}
             pathOptions={{ color: "#fff", fillColor: "#4ade80", fillOpacity: 1, weight: 2 }}
+          />
+        </>
+      )}
+
+      {/* Hazard marker — amber circle */}
+      {hazardPos && (
+        <>
+          <CircleMarker
+            center={hazardPos}
+            radius={12}
+            pathOptions={{ color: "#f59e0b", fillColor: "#f59e0b", fillOpacity: 0.15, weight: 0 }}
+          />
+          <CircleMarker
+            center={hazardPos}
+            radius={6}
+            pathOptions={{ color: "#fff", fillColor: "#f59e0b", fillOpacity: 1, weight: 2 }}
           />
         </>
       )}
@@ -251,6 +463,23 @@ export default function TrackHikePage() {
   const [selectedHike, setSelectedHike] = useState(null);
 
   const plannedPath = selectedHike?.path?.map((p) => [p[0], p[1]]) ?? [];
+
+  // Alternative route (set when user accepts a reroute after reporting a hazard)
+  const altRoute = (() => {
+    if (!uid) return null;
+    try { return JSON.parse(localStorage.getItem(`altRoute_${uid}`)); } catch { return null; }
+  })();
+  const hasAltRoute = !!(altRoute && selectedHike &&
+    String(altRoute.trailId) === String(selectedHike?.selectedTrailId));
+  const hazardPos = hasAltRoute && altRoute.hazardLat && altRoute.hazardLng
+    ? [altRoute.hazardLat, altRoute.hazardLng]
+    : null;
+  const altOriginalPath = hasAltRoute && altRoute.originalRoute?.path?.length
+    ? altRoute.originalRoute.path.map(p => [p[0], p[1]])
+    : null;
+  const altMapPath = hasAltRoute && altRoute.alternativeRoute?.path?.length
+    ? altRoute.alternativeRoute.path.map(p => [p[0], p[1]])
+    : null;
 
   // Tracking state
   const [status, setStatus]           = useState("idle");   // idle | tracking | done
@@ -444,6 +673,7 @@ export default function TrackHikePage() {
     if (hikeHistoryKey) localStorage.setItem(hikeHistoryKey, JSON.stringify(updated));
     if (activeTrackKey) localStorage.removeItem(activeTrackKey);
     if (upcomingKey)    localStorage.removeItem(upcomingKey);
+    if (uid)            localStorage.removeItem(`altRoute_${uid}`);
 
     // Remove the completed hike from the registered hikes list so it can't be selected again
     if (registeredKey && selectedHike) {
@@ -550,39 +780,79 @@ export default function TrackHikePage() {
           </div>
         )}
 
+        {/* ── ALTERNATIVE ROUTE BANNER ── */}
+        {hasAltRoute && (
+          <div className="bg-amber/10 border border-amber/20 rounded-2xl px-4 py-3 mb-4 flex items-start gap-3">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber">Alternative Route Active</p>
+              <p className="text-xs text-muted mt-0.5">
+                Hazard detected — your trail has been rerouted. Amber marker shows hazard location.
+                {altRoute?.alternativeRoute?.distanceText ? ` New distance: ${altRoute.alternativeRoute.distanceText}.` : ""}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ── MAP ── */}
         <div className="rounded-2xl overflow-hidden border border-white/5 mb-4" style={{ height: 340 }}>
           <TrackMap
             plannedPath={plannedPath}
             trackedPath={trackedPath}
             currentPos={currentPos}
+            hazardPos={hazardPos}
+            altOriginalPath={altOriginalPath}
+            altPath={altMapPath}
           />
         </div>
 
         {/* ── MAP LEGEND ── */}
         <div className="flex items-center gap-4 mb-5 px-1 flex-wrap">
-          {plannedPath.length > 1 && (
-            <div className="flex items-center gap-1.5">
-              <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="white" strokeWidth="2" strokeDasharray="4 4" strokeOpacity="0.35"/></svg>
-              <span className="text-xs text-muted">Planned route</span>
-            </div>
-          )}
-          {plannedPath.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="white" fillOpacity="0.9"/></svg>
-              <span className="text-xs text-muted">Start</span>
-            </div>
-          )}
-          {plannedPath.length > 1 && (
-            <div className="flex items-center gap-1.5">
-              <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="#333" stroke="white" strokeWidth="1.5"/></svg>
-              <span className="text-xs text-muted">End</span>
-            </div>
+          {hasAltRoute ? (
+            <>
+              <div className="flex items-center gap-1.5">
+                <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#4ade80" strokeWidth="2" strokeDasharray="4 4" strokeOpacity="0.5"/></svg>
+                <span className="text-xs text-muted">Original</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#22d3ee" strokeWidth="4" strokeOpacity="0.9"/></svg>
+                <span className="text-xs text-muted">Safer route</span>
+              </div>
+            </>
+          ) : (
+            <>
+              {plannedPath.length > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="white" strokeWidth="2" strokeDasharray="4 4" strokeOpacity="0.35"/></svg>
+                  <span className="text-xs text-muted">Planned route</span>
+                </div>
+              )}
+              {plannedPath.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="white" fillOpacity="0.9"/></svg>
+                  <span className="text-xs text-muted">Start</span>
+                </div>
+              )}
+              {plannedPath.length > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="#333" stroke="white" strokeWidth="1.5"/></svg>
+                  <span className="text-xs text-muted">End</span>
+                </div>
+              )}
+            </>
           )}
           <div className="flex items-center gap-1.5">
             <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#4ade80" strokeWidth="3" strokeOpacity="0.9"/></svg>
             <span className="text-xs text-muted">Your path</span>
           </div>
+          {hazardPos && (
+            <div className="flex items-center gap-1.5">
+              <svg width="10" height="10"><circle cx="5" cy="5" r="4" fill="#f59e0b" stroke="white" strokeWidth="1.5"/></svg>
+              <span className="text-xs text-muted">Hazard</span>
+            </div>
+          )}
         </div>
 
         {/* ── STATS BAR ── */}
@@ -625,6 +895,14 @@ export default function TrackHikePage() {
           <div className="bg-amber-400/10 border border-amber-400/20 rounded-2xl px-4 py-3 mb-4 text-sm text-amber-400">
             ⚠ {syncErr}
           </div>
+        )}
+
+        {/* ── ACTIVE TRAIL INCIDENTS & HAZARDS (shown while tracking) ── */}
+        {status === "tracking" && selectedHike?.selectedTrailId && (
+          <>
+            <TrailIncidents trailId={selectedHike.selectedTrailId} />
+            <TrailHazards   trailId={selectedHike.selectedTrailId} />
+          </>
         )}
 
         {/* ── ACTION BUTTONS ── */}

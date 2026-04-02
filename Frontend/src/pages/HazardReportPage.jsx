@@ -8,9 +8,22 @@ import { useHazardReport } from "../hooks/useHazardReport.js";
 import { useGeolocation } from "../hooks/useGeolocation.js";
 import { useProfile } from "../hooks/useProfile.js";
 import { useNavigate } from "react-router-dom";
-import { kongFetch } from "../lib/kongClient.js";
 
-const MAPS_URL = import.meta.env.VITE_MAPS_WRAPPER_URL ?? "http://localhost:8080/api/maps";
+const GMAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? "";
+
+async function reverseGeocode(lat, lng) {
+  if (!GMAPS_KEY) return null;
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GMAPS_KEY}`
+    );
+    const data = await res.json();
+    if (data.status === "OK" && data.results?.[0]?.formatted_address) {
+      return data.results[0].formatted_address;
+    }
+  } catch { /* give up */ }
+  return null;
+}
 
 export default function HazardReportPage() {
   const { submitReport, loading } = useHazardReport();
@@ -19,6 +32,15 @@ export default function HazardReportPage() {
   const navigate = useNavigate();
   const [hazardType, setHazardType] = useState(null);
   const [resolvedAddress, setResolvedAddress] = useState(null);
+
+  // ── Guard: only accessible while actively hiking ─────────────────────────
+  const isActivelyHiking = (() => {
+    if (!uid) return false;
+    try {
+      const saved = JSON.parse(localStorage.getItem(`activeTrack_${uid}`));
+      return saved?.status === "tracking";
+    } catch { return false; }
+  })();
 
   // Read the active hike from localStorage (same pattern as EmergencyReportPage)
   const upcomingKey  = uid ? `upcomingHike_${uid}` : null;
@@ -35,10 +57,7 @@ export default function HazardReportPage() {
   // Resolve GPS coords to human-readable address
   useEffect(() => {
     if (!coords) return;
-    kongFetch(`${MAPS_URL}/reverse-geocode?lat=${coords.lat}&lng=${coords.lng}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.formattedAddress) setResolvedAddress(data.formattedAddress); })
-      .catch(() => {});
+    reverseGeocode(coords.lat, coords.lng).then(addr => { if (addr) setResolvedAddress(addr); });
   }, [coords?.lat, coords?.lng]);
 
   async function handleSubmit(data) {
@@ -53,6 +72,25 @@ export default function HazardReportPage() {
     // Navigate regardless — AlternativeRoutePage has its own fallback
     navigate("/hazard/alternative");
   }
+
+  if (!isActivelyHiking) return (
+    <div className="flex flex-col min-h-screen relative z-[1]">
+      <Navbar />
+      <main className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-14 h-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <h2 className="text-lg font-semibold text-fg mb-2">Not on a hike</h2>
+        <p className="text-sm text-muted mb-6 max-w-xs">Hazard reporting is only available while you have an active hike in progress. Start tracking your hike first.</p>
+        <button onClick={() => navigate("/track-hike")}
+          className="px-5 py-2.5 rounded-full bg-primary text-sm font-semibold text-black cursor-pointer border-none hover:opacity-90 transition-opacity">
+          Go to Track Hike
+        </button>
+      </main>
+    </div>
+  );
 
   return (
     <div className="flex flex-col min-h-screen relative z-[1]">
