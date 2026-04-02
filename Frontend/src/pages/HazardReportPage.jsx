@@ -42,8 +42,16 @@ export default function HazardReportPage() {
   }, [coords?.lat, coords?.lng]);
 
   async function handleSubmit(data) {
+    // Always store the submission payload so AlternativeRoutePage can
+    // call the service directly if the full chain didn't return data.
+    sessionStorage.setItem("hazardPayload", JSON.stringify(data));
+
     const result = await submitReport({ ...data, hazardType });
-    if (result) navigate("/hazard/alternative");
+    if (result?.reroutingResult) {
+      sessionStorage.setItem("altRouteData", JSON.stringify(result.reroutingResult));
+    }
+    // Navigate regardless — AlternativeRoutePage has its own fallback
+    navigate("/hazard/alternative");
   }
 
   return (

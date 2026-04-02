@@ -185,6 +185,42 @@ async def get_trail(trail_id: str):
     }
 
 
+@app.post("/trails/candidates", tags=["Trail"])
+async def get_candidate_trails(body: dict):
+    """
+    Returns all OPEN trails excluding the specified one.
+    Body: {excludeTrailId, requiredOperationalStatus?}
+    """
+    exclude_id = body.get("excludeTrailId", "")
+    required   = body.get("requiredOperationalStatus", "OPEN").upper()
+
+    def _parse_coord(coord_str: str):
+        parts = coord_str.split(",")
+        return float(parts[0].strip()), float(parts[1].strip())
+
+    candidates = []
+    for data in TRAIL_DB.values():
+        if data["trailId"] == exclude_id:
+            continue
+        if data["operationalStatus"].upper() != required:
+            continue
+        start_lat, start_lng = _parse_coord(data["startPoint"])
+        end_lat, end_lng     = _parse_coord(data["endPoint"])
+        candidates.append({
+            "trailId":       data["trailId"],
+            "name":          data["name"],
+            "difficulty":    data["difficulty"],
+            "startPoint":    data["startPoint"],
+            "endPoint":      data["endPoint"],
+            "trailHeadLat":  start_lat,
+            "trailHeadLng":  start_lng,
+            "trailEndLat":   end_lat,
+            "trailEndLng":   end_lng,
+        })
+
+    return {"candidateTrails": candidates, "count": len(candidates)}
+
+
 @app.get("/health", tags=["Ops"])
 async def health():
     return {"status": "ok", "service": "Trail_Condition_Service"}
