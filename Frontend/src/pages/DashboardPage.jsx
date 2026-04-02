@@ -57,7 +57,13 @@ function TrailIncidents({ trailId }) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then(data => { setIncidents(data.incidents ?? []); })
+      .then(data => {
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        const recent = (data.incidents ?? []).filter(
+          inc => inc.reportedAt && new Date(inc.reportedAt).getTime() >= cutoff
+        );
+        setIncidents(recent);
+      })
       .catch(err => { console.error("[TrailIncidents]", err); setError(err.message); })
       .finally(() => setLoading(false));
   }, [trailId]);
