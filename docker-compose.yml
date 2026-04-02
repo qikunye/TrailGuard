@@ -131,6 +131,8 @@ services:
       - weather-wrapper
       - evaluator-wrapper
       - googlemaps-wrapper
+      - notification-wrapper
+      - alternative-route
     networks:
       - trailguard
 
@@ -347,6 +349,52 @@ services:
       - PORT=5006
     env_file:
       - ./Services/.env
+    networks:
+      - trailguard
+    restart: unless-stopped
+
+
+  # ─── Report Ingestion Service (Scenario 3 — Hazard Reporting) ────
+  report-ingestion:
+    build:
+      context: ./Services
+      dockerfile: orchestrator/Dockerfile
+    command: uvicorn Report_Ingestion_Service:app --host 0.0.0.0 --port 8010
+    expose:
+      - "8010"
+    environment:
+      - PORT=8010
+      - TRAIL_CONDITION_URL=http://trail-condition:8002
+      - NOTIFICATION_URL=http://notification-wrapper:5050
+      - ALTERNATIVE_ROUTE_URL=http://alternative-route:8009
+    env_file:
+      - ./Services/.env
+    depends_on:
+      - trail-condition
+      - notification-wrapper
+      - alternative-route
+    networks:
+      - trailguard
+    restart: unless-stopped
+
+  # ─── Alternative Route Service (Scenario 3 — Rerouting) ─────────
+  alternative-route:
+    build:
+      context: ./Services
+      dockerfile: orchestrator/Dockerfile
+    command: uvicorn Alternative_Route_Service:app --host 0.0.0.0 --port 8009
+    expose:
+      - "8009"
+    environment:
+      - PORT=8009
+      - TRAIL_CONDITION_URL=http://trail-condition:8002
+      - GOOGLEMAPS_URL=http://googlemaps-wrapper:8007
+      - REPORT_INGESTION_URL=http://report-ingestion:8010
+    env_file:
+      - ./Services/.env
+    depends_on:
+      - trail-condition
+      - googlemaps-wrapper
     networks:
       - trailguard
     restart: unless-stopped
