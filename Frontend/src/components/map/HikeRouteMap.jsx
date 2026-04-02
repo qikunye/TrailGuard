@@ -21,6 +21,25 @@ const currentIcon = makeIcon("#3b82f6");
 // ── Coordinate guard ──────────────────────────────────────────────────────
 const validCoord = (p) => p != null && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng));
 
+// ── OSRM fallback (free, no API key needed) ──────────────────────────────
+async function fetchOSRMRoute(start, end) {
+  const url = `https://router.project-osrm.org/route/v1/foot/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.code !== "Ok" || !data.routes?.length) return null;
+  const route = data.routes[0];
+  const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+  return {
+    path: coords,
+    distanceMetres: route.distance,
+    distanceText: route.distance >= 1000 ? `${(route.distance / 1000).toFixed(1)} km` : `${Math.round(route.distance)} m`,
+    durationSeconds: route.duration,
+    durationText: route.duration >= 3600
+      ? `${Math.floor(route.duration / 3600)} hr ${Math.round((route.duration % 3600) / 60)} min`
+      : `${Math.round(route.duration / 60)} min`,
+  };
+}
+
 // ── Map view helper — fits to route when available, else to markers ────────
 function MapView({ start, end, route }) {
   const map = useMap();
@@ -174,29 +193,41 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
     setRoute(null);
 
     (async () => {
+      let data = null;
+
+      // Try Google Maps wrapper first
       try {
-        const res  = await kongFetch(
+        const res = await kongFetch(
           `${WRAPPER}/directions?origin_lat=${start.lat}&origin_lng=${start.lng}&dest_lat=${end.lat}&dest_lng=${end.lng}&mode=walking`
         );
-        const data = await res.json();
-        if (!res.ok || !data.path?.length) { setStatus("error"); return; }
+        const json = await res.json();
+        if (res.ok && json.path?.length) data = json;
+      } catch { /* fall through to OSRM */ }
 
-        const info = {
-          startName:       start.name,
-          endName:         end.name,
-          distanceText:    data.distanceText,
-          durationText:    data.durationText,
-          distanceMetres:  data.distanceMetres,
-          durationSeconds: data.durationSeconds,
-          startLat: start.lat, startLng: start.lng,
-          endLat:   end.lat,   endLng:   end.lng,
-          path:     data.path,
-        };
-        setRoute(data.path);
-        setRouteInfo(info);
-        setStatus("ok");
-        onRouteReady?.(info);
-      } catch { setStatus("error"); }
+      // Fallback to OSRM if wrapper failed
+      if (!data) {
+        try {
+          data = await fetchOSRMRoute(start, end);
+        } catch { /* give up */ }
+      }
+
+      if (!data?.path?.length) { setStatus("error"); return; }
+
+      const info = {
+        startName:       start.name,
+        endName:         end.name,
+        distanceText:    data.distanceText,
+        durationText:    data.durationText,
+        distanceMetres:  data.distanceMetres,
+        durationSeconds: data.durationSeconds,
+        startLat: start.lat, startLng: start.lng,
+        endLat:   end.lat,   endLng:   end.lng,
+        path:     data.path,
+      };
+      setRoute(data.path);
+      setRouteInfo(info);
+      setStatus("ok");
+      onRouteReady?.(info);
     })();
   }, [start, end]);
 

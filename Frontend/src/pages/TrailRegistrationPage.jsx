@@ -19,9 +19,9 @@ const lbl  = "block text-[0.82rem] font-semibold tracking-[0.04em] text-fg mb-1.
 // ── Static fallback if backend is unreachable ─────────────────────────────────
 const FALLBACK_TRAILS = [
   { trailId: "1", trailName: "Southern Ridges Loop",       difficulty: "Easy",     operationalStatus: "OPEN",
-    startPoint: "1.2742, 103.8089", endPoint: "1.2618, 103.8232" },
+    startPoint: "1.2644, 103.8208", endPoint: "1.2895, 103.8043" },
   { trailId: "2", trailName: "MacRitchie Reservoir Trail", difficulty: "Moderate", operationalStatus: "OPEN",
-    startPoint: "1.3441, 103.8198", endPoint: "1.3602, 103.8326" },
+    startPoint: "1.3442, 103.8197", endPoint: "1.3592, 103.8320" },
 ];
 
 // ── Main page ─────────────────────────────────────────────────────────────────
