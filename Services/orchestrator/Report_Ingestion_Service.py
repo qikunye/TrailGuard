@@ -72,6 +72,8 @@ REROUTE_STATUSES = {"CAUTION", "CLOSED"}
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class HazardReport(BaseModel):
+    model_config = {"extra": "ignore"}
+
     hikerId:     str   = Field(...,  example="usr_001")
     trailId:     str   = Field(...,  example="trail_mt_kinabalu")
     mountainId:  str   = Field(...,  example="mountain_kinabalu")
@@ -206,41 +208,37 @@ async def report_hazard(report: HazardReport):
         except HTTPException as e:
             log.warning("Step 3 ✗ Broadcast failed (non-fatal): %s", e.detail)
 
-        # ── Step 4: Trigger rerouting if CAUTION or CLOSED ───────────────────
-        if operational_status in REROUTE_STATUSES:
-            log.info(
-                "Step 4 – Triggering rerouting | operationalStatus=%s → POST /alternative-route",
-                operational_status,
+        # ── Step 4: Always trigger rerouting when a hazard is reported ─────
+        # A new hazard report means conditions have changed, regardless of
+        # the trail's current DB status. Always offer an alternative route.
+        log.info(
+            "Step 4 – Triggering rerouting | operationalStatus=%s → POST /alternative-route",
+            operational_status,
+        )
+        reroute_payload = {
+            "hikerId":    report.hikerId,
+            "trailId":    report.trailId,
+            "mountainId": report.mountainId,
+            "hazardLat":  report.hazardLat,
+            "hazardLng":  report.hazardLng,
+            "currentLat": report.currentLat,
+            "currentLng": report.currentLng,
+        }
+        try:
+            rerouting_result = await _post(
+                client,
+                f"{ALTERNATIVE_ROUTE_URL}/alternative-route",
+                reroute_payload,
             )
-            reroute_payload = {
-                "hikerId":    report.hikerId,
-                "trailId":    report.trailId,
-                "mountainId": report.mountainId,
-                "hazardLat":  report.hazardLat,
-                "hazardLng":  report.hazardLng,
-                "currentLat": report.currentLat,
-                "currentLng": report.currentLng,
-            }
-            try:
-                rerouting_result = await _post(
-                    client,
-                    f"{ALTERNATIVE_ROUTE_URL}/alternative-route",
-                    reroute_payload,
-                )
-                log.info(
-                    "Step 4 ✓ Rerouting complete | alternativeTrailId=%s distanceM=%s travelTimeMins=%s",
-                    rerouting_result.get("alternativeTrailId"),
-                    rerouting_result.get("routeDistanceMeters"),
-                    rerouting_result.get("estimatedTravelTimeMins"),
-                )
-            except HTTPException as e:
-                log.error("Step 4 ✗ Rerouting failed: %s", e.detail)
-                rerouting_result = {"status": "FAILED", "error": e.detail}
-        else:
             log.info(
-                "Step 4 – Skipping rerouting | operationalStatus=%s does not require rerouting",
-                operational_status,
+                "Step 4 ✓ Rerouting complete | alternativeTrailId=%s distanceM=%s travelTimeMins=%s",
+                rerouting_result.get("alternativeTrailId"),
+                rerouting_result.get("routeDistanceMeters"),
+                rerouting_result.get("estimatedTravelTimeMins"),
             )
+        except HTTPException as e:
+            log.error("Step 4 ✗ Rerouting failed: %s", e.detail)
+            rerouting_result = {"status": "FAILED", "error": e.detail}
 
     # ── Build and return response to UI ───────────────────────────────────────
     response = {
@@ -252,7 +250,7 @@ async def report_hazard(report: HazardReport):
         "hazardType":        report.hazardType,
         "severity":          report.severity,
         "operationalStatus": operational_status,
-        "reroutingTriggered": operational_status in REROUTE_STATUSES,
+        "reroutingTriggered": True,
         "reroutingResult":   rerouting_result,
         "reportedAt":        hazard_record["reportedAt"],
     }
