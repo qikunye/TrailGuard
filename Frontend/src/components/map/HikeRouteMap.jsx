@@ -23,7 +23,7 @@ const validCoord = (p) => p != null && Number.isFinite(Number(p.lat)) && Number.
 
 // ── OSRM fallback (free, no API key needed) ──────────────────────────────
 async function fetchOSRMRoute(start, end) {
-  const url = `https://router.project-osrm.org/route/v1/foot/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
+  const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`;
   const res = await fetch(url);
   const data = await res.json();
   if (data.code !== "Ok" || !data.routes?.length) return null;
@@ -169,7 +169,7 @@ function LocationInput({ placeholder, color, onSelect, defaultValue, label }) {
 }
 
 // ── Main component ────────────────────────────────────────────────────────
-export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange, initialStart, initialEnd, startLabel, endLabel }) {
+export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange, initialStart, initialEnd, startLabel, endLabel, distanceText: distanceOverride, durationText: durationOverride }) {
   const [start,      setStart]      = useState(null);
   const [end,        setEnd]        = useState(null);
   const [route,      setRoute]      = useState(null);
@@ -216,8 +216,8 @@ export default function HikeRouteMap({ onRouteReady, onStartChange, onEndChange,
       const info = {
         startName:       start.name,
         endName:         end.name,
-        distanceText:    data.distanceText,
-        durationText:    data.durationText,
+        distanceText:    distanceOverride ?? data.distanceText,
+        durationText:    durationOverride ?? data.durationText,
         distanceMetres:  data.distanceMetres,
         durationSeconds: data.durationSeconds,
         startLat: start.lat, startLng: start.lng,

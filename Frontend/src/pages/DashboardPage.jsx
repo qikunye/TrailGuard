@@ -6,7 +6,6 @@ import { useAuth } from "../hooks/useAuth.js";
 import { useProfile } from "../hooks/useProfile.js";
 import { useAssessment, deriveExpLevel } from "../hooks/useAssessment.js";
 import AssessmentModal from "../components/assessment/AssessmentModal.jsx";
-import { kongFetch } from "../lib/kongClient.js";
 
 // ── WMO code → icon + label (Open-Meteo fallback) ────────────────────────
 function wmoInfo(code) {
@@ -37,85 +36,7 @@ function googleConditionInfo(type = "") {
   return { icon: "🌤", label: type.replace(/_/g, " ") };
 }
 
-const GMAPS_KEY    = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-const INCIDENT_URL = import.meta.env.VITE_INCIDENT_URL ?? "http://localhost:8080/api/incident";
-
-const SEVERITY_LABELS = { 1: "Minor", 2: "Moderate", 3: "Serious", 4: "Critical", 5: "Fatal" };
-const SEVERITY_COLOR  = (s) => s >= 4 ? "text-red bg-red/10 border-red/20" : s >= 3 ? "text-amber bg-amber/10 border-amber/20" : "text-primary bg-primary/10 border-primary/20";
-
-function TrailIncidents({ trailId }) {
-  const [incidents, setIncidents] = useState([]);
-  const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState(null);
-
-  useEffect(() => {
-    if (!trailId) return;
-    setLoading(true);
-    setError(null);
-    kongFetch(`${INCIDENT_URL}/incidents/trail/${trailId}/active`)
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(data => {
-        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-        const recent = (data.incidents ?? []).filter(
-          inc => inc.reportedAt && new Date(inc.reportedAt).getTime() >= cutoff
-        );
-        setIncidents(recent);
-      })
-      .catch(err => { console.error("[TrailIncidents]", err); setError(err.message); })
-      .finally(() => setLoading(false));
-  }, [trailId]);
-
-  if (!trailId) return null;
-  if (loading) return (
-    <div className="mt-8 flex items-center gap-2 text-xs text-muted px-1">
-      <div className="w-3 h-3 border border-muted border-t-transparent rounded-full animate-spin" />
-      Loading trail incidents…
-    </div>
-  );
-  if (error) return (
-    <div className="mt-8">
-      <p className="text-xs text-muted uppercase tracking-widest mb-2">Active Hike Incidents on This Trail</p>
-      <p className="text-xs text-muted px-1">Could not load — {error}</p>
-    </div>
-  );
-  if (incidents.length === 0) return null;
-
-  return (
-    <div className="mt-8">
-      <p className="text-xs text-muted uppercase tracking-widest mb-3">Active Hike Incidents on This Trail</p>
-      <div className="flex flex-col gap-2">
-        {incidents.map((inc) => (
-          <div key={inc.incidentId ?? inc.id} className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <p className="text-sm font-semibold text-fg">{inc.injuryType}</p>
-                  {inc.severity && (
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_COLOR(inc.severity)}`}>
-                      {SEVERITY_LABELS[inc.severity] ?? `Severity ${inc.severity}`}
-                    </span>
-                  )}
-                </div>
-                {inc.description && (
-                  <p className="text-xs text-muted truncate mb-1">{inc.description}</p>
-                )}
-                <p className="text-xs text-muted font-mono">
-                  {inc.reportedAt ? new Date(inc.reportedAt).toLocaleString("en-SG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                </p>
-              </div>
-              <div className="shrink-0 mt-0.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-red block" title="Incident" />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+const GMAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 async function resolveCoords(hike) {
   if (hike.startLat && hike.startLng) return { lat: hike.startLat, lng: hike.startLng };
@@ -301,6 +222,14 @@ export default function DashboardPage() {
     try { return JSON.parse(localStorage.getItem(upcomingKey)); } catch { return null; }
   })();
 
+  const isActivelyHiking = (() => {
+    if (!uid) return false;
+    try {
+      const saved = JSON.parse(localStorage.getItem(`activeTrack_${uid}`));
+      return saved?.status === "tracking";
+    } catch { return false; }
+  })();
+
   // ── Trail assessment (same flow as Register Hike page) ──────────────────
   const { assess, loading: checkLoading } = useAssessment();
   const [assessment, setAssessment] = useState(null);
@@ -366,6 +295,7 @@ export default function DashboardPage() {
           )}
         </div>
 
+
         {/* ── UPCOMING HIKE CARD ── */}
         {upcomingHike ? (
           <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-4 mb-6 flex items-center justify-between gap-4">
@@ -426,63 +356,115 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* ── ACTIVE TRAIL INCIDENTS ── */}
-        <TrailIncidents trailId={upcomingHike?.selectedTrailId} />
-
         {/* ── RECOMMENDED TRAILS ── */}
         <div className="mt-8">
           <p className="text-xs text-muted uppercase tracking-widest mb-3">Recommended Trails</p>
           <div className="flex flex-col gap-3">
             {[
               {
-                name: "MacRitchie Reservoir Loop",
-                start: "MacRitchie Reservoir Park, Singapore",
-                end: "HSBC TreeTop Walk, Singapore",
-                distance: "11 km", duration: "3–4 h",
-                difficulty: "Moderate", diffColor: "text-amber", diffBg: "bg-amber/10",
-                tags: ["Forest", "Boardwalk"],
-                desc: "Scenic loop around the reservoir with a treetop walk viewpoint.",
-              },
-              {
-                name: "Bukit Timah Summit",
-                start: "Bukit Timah Nature Reserve Visitor Centre, Singapore",
-                end: "Bukit Timah Hill Summit, Singapore",
-                distance: "6 km", duration: "2–3 h",
-                difficulty: "Moderate", diffColor: "text-amber", diffBg: "bg-amber/10",
-                tags: ["Hill", "Nature Reserve"],
-                desc: "Singapore's highest natural point at 163m, dense primary rainforest.",
-              },
-              {
-                name: "Southern Ridges",
+                trailId: "1",
+                name: "Southern Ridges Loop",
                 start: "HarbourFront MRT Station, Singapore",
-                end: "Labrador Nature Reserve, Singapore",
+                end: "Hort Park, Alexandra Road, Singapore",
                 distance: "9 km", duration: "3 h",
                 difficulty: "Easy", diffColor: "text-primary", diffBg: "bg-primary/10",
                 tags: ["Skyline", "Park Connector"],
-                desc: "Connected ridge parks from HarbourFront to Labrador with city views.",
+                desc: "Connected ridge parks from HarbourFront to Hort Park with sweeping city views.",
               },
               {
-                name: "Sungei Buloh Wetland Reserve",
-                start: "Sungei Buloh Wetland Reserve, Singapore",
-                end: "Kranji Marshes, Singapore",
+                trailId: "2",
+                name: "MacRitchie Reservoir Trail",
+                start: "MacRitchie Reservoir Carpark, Island Club Road, Singapore",
+                end: "Venus Drive Carpark, Singapore",
+                distance: "11 km", duration: "3–4 h",
+                difficulty: "Moderate", diffColor: "text-amber", diffBg: "bg-amber/10",
+                tags: ["Forest", "Boardwalk"],
+                desc: "Scenic loop around the reservoir with a treetop walk and wildlife sightings.",
+              },
+              {
+                trailId: "3",
+                name: "Bukit Timah Summit Trail",
+                start: "Bukit Timah Nature Reserve, Hindhede Drive, Singapore",
+                end: "Dairy Farm Nature Park, Singapore",
+                distance: "6 km", duration: "2–3 h",
+                difficulty: "Hard", diffColor: "text-red", diffBg: "bg-red/10",
+                tags: ["Hill", "Summit"],
+                desc: "Singapore's highest natural point at 163 m through dense primary rainforest.",
+              },
+              {
+                trailId: "4",
+                name: "Labrador Nature Reserve Trail",
+                start: "Labrador Park MRT Station, Singapore",
+                end: "Berlayer Creek, Labrador Nature Reserve, Singapore",
+                distance: "3.5 km", duration: "1–2 h",
+                difficulty: "Easy", diffColor: "text-primary", diffBg: "bg-primary/10",
+                tags: ["Coastal", "Heritage"],
+                desc: "Seaside cliffs and WWII heritage trails overlooking the Strait of Singapore.",
+              },
+              {
+                trailId: "5",
+                name: "Sungei Buloh Wetland Walk",
+                start: "Sungei Buloh Wetland Reserve, Neo Tiew Crescent, Singapore",
+                end: "Sungei Buloh Far Observation Hide, Singapore",
                 distance: "7 km", duration: "2–3 h",
                 difficulty: "Easy", diffColor: "text-primary", diffBg: "bg-primary/10",
                 tags: ["Wetlands", "Wildlife"],
                 desc: "Mangrove boardwalks with resident monitor lizards and migratory birds.",
               },
               {
-                name: "Pulau Ubin Chek Jawa",
-                start: "Pulau Ubin Jetty, Singapore",
-                end: "Chek Jawa Wetlands, Singapore",
+                trailId: "6",
+                name: "Bukit Batok Nature Park Loop",
+                start: "Bukit Batok Nature Park, Bukit Batok East Avenue 2, Singapore",
+                end: "Little Guilin, Bukit Batok, Singapore",
+                distance: "3 km", duration: "1.5 h",
+                difficulty: "Easy", diffColor: "text-primary", diffBg: "bg-primary/10",
+                tags: ["Forest", "Lake"],
+                desc: "Peaceful loop past granite quarry ponds and secondary forest in the west.",
+              },
+              {
+                trailId: "7",
+                name: "Pulau Ubin Chek Jawa Trail",
+                start: "Pulau Ubin Village Jetty, Singapore",
+                end: "Chek Jawa Wetlands Visitor Centre, Singapore",
                 distance: "5 km", duration: "2 h",
                 difficulty: "Easy", diffColor: "text-primary", diffBg: "bg-primary/10",
                 tags: ["Island", "Coastal"],
                 desc: "Coastal wetland boardwalk on Singapore's rustic island getaway.",
               },
+              {
+                trailId: "8",
+                name: "Kent Ridge Park Trail",
+                start: "Kent Ridge Park, Vigilante Drive, Singapore",
+                end: "West Coast Road, Kent Ridge, Singapore",
+                distance: "4.5 km", duration: "1.5–2 h",
+                difficulty: "Moderate", diffColor: "text-amber", diffBg: "bg-amber/10",
+                tags: ["Historical", "Forest"],
+                desc: "Forested ridge with WWII battle sites and sweeping views over Pasir Panjang.",
+              },
+              {
+                trailId: "9",
+                name: "Admiralty Park Mangrove Trail",
+                start: "Admiralty Park, Admiralty Road West, Singapore",
+                end: "Admiralty Park Mangrove Boardwalk, Singapore",
+                distance: "4 km", duration: "1.5 h",
+                difficulty: "Easy", diffColor: "text-primary", diffBg: "bg-primary/10",
+                tags: ["Mangrove", "Boardwalk"],
+                desc: "Tranquil mangrove boardwalk along the Strait of Johor in the far north.",
+              },
+              {
+                trailId: "10",
+                name: "Clementi Forest Trail",
+                start: "Clementi Avenue 6, Clementi Forest, Singapore",
+                end: "West Coast Highway, Clementi, Singapore",
+                distance: "5.5 km", duration: "2 h",
+                difficulty: "Moderate", diffColor: "text-amber", diffBg: "bg-amber/10",
+                tags: ["Forest", "Off-road"],
+                desc: "Unofficial forest trails through secondary woodland — a hidden urban escape.",
+              },
             ].map((trail) => (
               <div
                 key={trail.name}
-                onClick={() => navigate("/register-trail", { state: { start: trail.start, end: trail.end, name: trail.name } })}
+                onClick={() => navigate("/register-trail", { state: { start: trail.start, end: trail.end, name: trail.name, trailId: trail.trailId } })}
                 className="flex items-start gap-4 bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-4 hover:bg-white/[0.05] hover:border-primary/20 transition-all cursor-pointer group"
               >
                 {/* Icon */}

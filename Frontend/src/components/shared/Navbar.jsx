@@ -24,6 +24,15 @@ export default function Navbar() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [menuOpen,    setMenuOpen]    = useState(false);
 
+  const isActivelyHiking = (() => {
+    const uid = currentUser?.uid;
+    if (!uid) return false;
+    try {
+      const saved = JSON.parse(localStorage.getItem(`activeTrack_${uid}`));
+      return saved?.status === "tracking";
+    } catch { return false; }
+  })();
+
   // Close both panels on navigation
   useEffect(() => {
     setProfileOpen(false);
@@ -127,16 +136,27 @@ export default function Navbar() {
           className="md:hidden fixed left-0 right-0 z-[1400] bg-black/95 backdrop-blur-xl border-b border-white/10 p-3 space-y-1"
           style={{ top: HEADER_H }}
         >
-          {navLinks.map(({ to, label }) => (
-            <NavLink key={to} to={to} onClick={() => setMenuOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center px-4 py-3 rounded-xl text-sm font-medium no-underline transition-colors ${
-                  isActive ? "bg-primary/15 text-primary" : "text-muted hover:text-fg hover:bg-white/5"
-                }`
-              }>
-              {label}
-            </NavLink>
-          ))}
+          {navLinks.map(({ to, label }) => {
+            const hikeOnly = to === "/emergency" || to === "/hazard";
+            const disabled = hikeOnly && !isActivelyHiking;
+            if (disabled) return (
+              <span key={to}
+                className="flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium text-white/20 cursor-not-allowed select-none">
+                {label}
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/5 text-white/25 ml-2">On hike only</span>
+              </span>
+            );
+            return (
+              <NavLink key={to} to={to} onClick={() => setMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center px-4 py-3 rounded-xl text-sm font-medium no-underline transition-colors ${
+                    isActive ? "bg-primary/15 text-primary" : "text-muted hover:text-fg hover:bg-white/5"
+                  }`
+                }>
+                {label}
+              </NavLink>
+            );
+          })}
         </div>
       )}
 
@@ -165,15 +185,25 @@ export default function Navbar() {
           <div className="w-px h-5 bg-white/10 shrink-0" />
 
           <div className="flex items-center gap-1">
-            {navLinks.slice(0, 4).map(({ to, label }) => (
-              <NavLink key={to} to={to}
-                className={({ isActive }) =>
-                  `text-sm font-medium px-4 py-2 rounded-full transition-all no-underline whitespace-nowrap ${
-                    isActive ? "bg-white/10 text-fg" : "text-muted hover:text-fg hover:bg-white/5"
-                  }`}>
-                {label}
-              </NavLink>
-            ))}
+            {navLinks.slice(0, 4).map(({ to, label }) => {
+              const hikeOnly = to === "/emergency" || to === "/hazard";
+              const disabled = hikeOnly && !isActivelyHiking;
+              if (disabled) return (
+                <span key={to} title="Start a hike to access this"
+                  className="text-sm font-medium px-4 py-2 rounded-full whitespace-nowrap text-white/25 cursor-not-allowed select-none">
+                  {label}
+                </span>
+              );
+              return (
+                <NavLink key={to} to={to}
+                  className={({ isActive }) =>
+                    `text-sm font-medium px-4 py-2 rounded-full transition-all no-underline whitespace-nowrap ${
+                      isActive ? "bg-white/10 text-fg" : "text-muted hover:text-fg hover:bg-white/5"
+                    }`}>
+                  {label}
+                </NavLink>
+              );
+            })}
           </div>
 
           <div className="w-px h-5 bg-white/10 shrink-0" />

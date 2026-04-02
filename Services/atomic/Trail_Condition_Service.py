@@ -3,14 +3,31 @@ TRAILGUARD – Trail Condition Service  (Atomic)
 Port: 8002
 
 Returns difficulty rating, surface state, active hazard count, and closure flags.
+
+OutSystems TrailConditionAPI quirks (as observed):
+  - operationalStatus is uppercase ("OPEN", "CLOSED", "CAUTION")
+  - ErrorCode is "INTERNAL_ERROR" (string) even on successful responses —
+    treat as success whenever operationalStatus is a non-empty string
+  - activeHazardCounts, highestSeverity, hazardTypes are NOT returned by the
+    real API; we default them so downstream services always get those fields
 """
 
 import os
+import httpx
+import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+log = logging.getLogger("trail_condition")
+
 app = FastAPI(title="TRAILGUARD – Trail Condition Service", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Real OutSystems TrailConditionAPI base URL (optional — falls back to local data if unset)
+OUTSYSTEMS_CONDITION_URL = os.getenv(
+    "OUTSYSTEMS_TRAIL_CONDITION_URL",
+    "https://personal-eisumi2z.outsystemscloud.com/HikerProfileService/rest/TrailConditionAPI",
+)
 
 # ── Trail data (matches real TrailDBAPI schema) ───────────────────────────────
 # trailId       : integer ID from the real API (stored as string key)
@@ -147,23 +164,55 @@ async def get_all_trails():
 
 # ── Swagger-aligned endpoint: TrailConditionAPI / Condition ──────────────────
 # Mirrors: GET /HikerProfileService/rest/TrailConditionAPI/Condition/{trailId}
-# Returns only the fields the Swagger contract guarantees.
+# Tries the real OutSystems API first; falls back to local TRAIL_DB.
+#
+# OutSystems response quirks handled here:
+#   - operationalStatus uppercase → normalised to lowercase
+#   - ErrorCode "INTERNAL_ERROR" string → treated as success if operationalStatus present
+#   - activeHazardCounts / highestSeverity / hazardTypes missing → defaulted from local data
 @app.get("/Condition/{trail_id}", tags=["TrailConditionAPI"])
 async def get_condition(trail_id: str):
-    data = TRAIL_DB.get(trail_id)
-    if not data:
+    os_status: str | None = None
+
+    # ── 1. Try real OutSystems API ────────────────────────────────────────────
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(f"{OUTSYSTEMS_CONDITION_URL}/Condition/{trail_id}")
+            if r.status_code == 200:
+                raw = r.json()
+                raw_status = raw.get("operationalStatus")
+                # Success: operationalStatus is a non-empty string
+                # (ErrorCode "INTERNAL_ERROR" is an OutSystems quirk — not a real error)
+                if raw_status:
+                    os_status = raw_status.lower()
+                    log.info("OutSystems Condition/%s → operationalStatus=%s", trail_id, os_status)
+    except Exception as exc:
+        log.warning("OutSystems TrailConditionAPI unavailable (%s) — using local data", exc)
+
+    # ── 2. Resolve local fallback data ────────────────────────────────────────
+    local = TRAIL_DB.get(trail_id)
+    if os_status is None and local is None:
         return {
             "operationalStatus": None, "activeHazardCounts": None,
             "highestSeverity": None, "hazardTypes": None,
             "Success": False, "ErrorCode": 404,
             "ErrorMessage": f"Trail '{trail_id}' not found.",
         }
-    closed = _is_closed(data)
+
+    # Prefer OutSystems operationalStatus; fall back to local
+    if os_status is not None:
+        final_status = os_status
+    else:
+        final_status = "closed" if _is_closed(local) else local["operationalStatus"].lower()
+
+    # activeHazardCounts / highestSeverity / hazardTypes: OutSystems doesn't return
+    # these, so always source from local data (default 0 / "none" / [] if trail unknown)
+    hazard_details = (local or {}).get("hazardDetails", [])
     return {
-        "operationalStatus":  "closed" if closed else data["operationalStatus"].lower(),
-        "activeHazardCounts": data["activeHazards"],
-        "highestSeverity":    _highest_severity(data.get("hazardDetails", [])),
-        "hazardTypes":        list({h["type"] for h in data.get("hazardDetails", [])}),
+        "operationalStatus":  final_status,
+        "activeHazardCounts": (local or {}).get("activeHazards", 0),
+        "highestSeverity":    _highest_severity(hazard_details),
+        "hazardTypes":        list({h["type"] for h in hazard_details}),
         "Success": True, "ErrorCode": 0, "ErrorMessage": "",
     }
 
