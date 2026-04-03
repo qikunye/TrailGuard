@@ -216,11 +216,26 @@ export default function DashboardPage() {
   const firstName = currentUser?.displayName?.split(" ")[0];
 
   const uid = currentUser?.uid ?? null;
-  const upcomingKey = uid ? `upcomingHike_${uid}` : null;
-  const upcomingHike = (() => {
-    if (!upcomingKey) return null;
-    try { return JSON.parse(localStorage.getItem(upcomingKey)); } catch { return null; }
+
+  // All registered hikes, sorted soonest-first
+  const registeredHikes = (() => {
+    if (!uid) return [];
+    try {
+      const hikes = JSON.parse(localStorage.getItem(`registeredHikes_${uid}`)) ?? [];
+      return hikes.sort((a, b) => {
+        const ta = new Date(`${a.startDate}T${a.startTime}`).getTime();
+        const tb = new Date(`${b.startDate}T${b.startTime}`).getTime();
+        return ta - tb;
+      });
+    } catch { return []; }
   })();
+
+  // Most upcoming hike = soonest hike that is still in the future
+  const now = Date.now();
+  const upcomingHike =
+    registeredHikes.find(h => new Date(`${h.startDate}T${h.startTime}`).getTime() > now)
+    ?? registeredHikes[0]   // fallback: show the most recent past hike if all are past
+    ?? null;
 
   const isActivelyHiking = (() => {
     if (!uid) return false;
@@ -235,17 +250,30 @@ export default function DashboardPage() {
   const [assessment, setAssessment] = useState(null);
   const [showModal,  setShowModal]  = useState(false);
 
-  async function handleCheckTrail() {
-    if (!upcomingHike?.selectedTrailId) return;
+  async function handleCheckTrail(hike) {
+    if (!hike?.selectedTrailId) return;
     const declaredExp = deriveExpLevel(Number(profile.totalHikesCompleted) || 0);
     const result = await assess({
       userId:           profile.userId ?? "usr_001",
-      trailId:          upcomingHike.selectedTrailId,
-      plannedDate:      upcomingHike.startDate,
-      plannedStartTime: upcomingHike.startTime,
+      trailId:          hike.selectedTrailId,
+      plannedDate:      hike.startDate,
+      plannedStartTime: hike.startTime,
       declaredExpLevel: declaredExp,
     });
     if (result) { setAssessment(result); setShowModal(true); }
+  }
+
+  function handleRemoveHike(hike) {
+    if (!uid) return;
+    const key = `registeredHikes_${uid}`;
+    const updated = registeredHikes.filter(h => h.registeredAt !== hike.registeredAt);
+    localStorage.setItem(key, JSON.stringify(updated));
+    // Also clear upcomingHike if it matches
+    try {
+      const upcoming = JSON.parse(localStorage.getItem(`upcomingHike_${uid}`));
+      if (upcoming?.registeredAt === hike.registeredAt) localStorage.removeItem(`upcomingHike_${uid}`);
+    } catch { /* ignore */ }
+    window.location.reload();
   }
 
   const hour = new Date().getHours();
@@ -261,7 +289,7 @@ export default function DashboardPage() {
         <div className="pt-7 pb-6">
           <p className="text-xs text-muted uppercase tracking-widest mb-1">{greeting}, {firstName ?? "Hiker"}</p>
           <h1 className="text-2xl sm:text-3xl font-bold text-fg leading-tight">
-            {upcomingHike
+            {registeredHikes.length > 0
               ? <>Your next hike is coming up</>
               : <>What do you need today?</>
             }
@@ -272,7 +300,7 @@ export default function DashboardPage() {
         <div className="relative rounded-2xl overflow-hidden bg-white/[0.03] border border-white/5 mb-4" style={{ height: 280 }}>
           <UpcomingHikeMap hike={upcomingHike} height={280} />
 
-          {/* Overlay pill – route label */}
+          {/* Overlay pill – next upcoming trail */}
           <div className="absolute top-3 left-3 z-[400] flex items-center gap-2 bg-black/70 backdrop-blur px-3 py-1.5 rounded-full">
             <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
             <span className="text-xs font-medium text-fg">
@@ -282,8 +310,8 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          {/* Register hike CTA if no upcoming hike */}
-          {!upcomingHike && (
+          {/* Register hike CTA if no hikes registered */}
+          {registeredHikes.length === 0 && (
             <div className="absolute inset-0 z-[400] flex items-end p-4 pointer-events-none">
               <Link to="/register-trail" className="pointer-events-auto">
                 <div className="inline-flex items-center gap-2 bg-primary/90 backdrop-blur text-black text-xs font-semibold px-4 py-2.5 rounded-full hover:bg-primary transition-colors">
@@ -296,47 +324,53 @@ export default function DashboardPage() {
         </div>
 
 
-        {/* ── UPCOMING HIKE CARD ── */}
-        {upcomingHike ? (
-          <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-4 mb-6 flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-xs text-muted mb-0.5">Upcoming hike</p>
-              <p className="font-semibold text-fg truncate">
-                {upcomingHike.startLocation} → {upcomingHike.endLocation}
-              </p>
-              <p className="text-xs text-muted mt-0.5">
-                {formatDate(upcomingHike.startDate, upcomingHike.startTime)}
-                {upcomingHike.estimatedDuration && ` · ${upcomingHike.estimatedDuration}h`}
-                {upcomingHike.partySize > 1 && ` · ${upcomingHike.partySize} people`}
-                {upcomingHike.distanceText && ` · ${upcomingHike.distanceText}`}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={handleCheckTrail}
-                disabled={checkLoading}
-                className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-full hover:bg-primary/20 transition-colors cursor-pointer border-solid disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {checkLoading
-                  ? <div className="w-3 h-3 border border-primary/40 border-t-primary rounded-full animate-spin" />
-                  : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                }
-                {checkLoading ? "Checking…" : "Check Trail"}
-              </button>
-              <button
-                onClick={() => { if (upcomingKey) localStorage.removeItem(upcomingKey); window.location.reload(); }}
-                className="text-muted hover:text-red transition-colors bg-transparent border-none cursor-pointer p-1"
-                title="Clear hike"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              </button>
-            </div>
+        {/* ── REGISTERED HIKES ── */}
+        {registeredHikes.length > 0 ? (
+          <div className="flex flex-col gap-2 mb-6">
+            {registeredHikes.map((hike, i) => (
+              <div key={hike.registeredAt ?? i} className="bg-white/[0.03] border border-white/5 rounded-2xl p-4 flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs text-muted mb-0.5">
+                    {hike === upcomingHike ? "Next hike" : "Registered hike"}
+                  </p>
+                  <p className="font-semibold text-fg truncate">
+                    {hike.startLocation} → {hike.endLocation}
+                  </p>
+                  <p className="text-xs text-muted mt-0.5">
+                    {formatDate(hike.startDate, hike.startTime)}
+                    {hike.estimatedDuration && ` · ${hike.estimatedDuration}h`}
+                    {hike.partySize > 1 && ` · ${hike.partySize} people`}
+                    {hike.distanceText && ` · ${hike.distanceText}`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => handleCheckTrail(hike)}
+                    disabled={checkLoading}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-full hover:bg-primary/20 transition-colors cursor-pointer border-solid disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {checkLoading
+                      ? <div className="w-3 h-3 border border-primary/40 border-t-primary rounded-full animate-spin" />
+                      : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2h11"/></svg>
+                    }
+                    {checkLoading ? "Checking…" : "Check Trail"}
+                  </button>
+                  <button
+                    onClick={() => handleRemoveHike(hike)}
+                    className="text-muted hover:text-red transition-colors bg-transparent border-none cursor-pointer p-1"
+                    title="Remove hike"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
           <div className="mb-6" />
         )}
 
-        {/* ── WEATHER ── */}
+        {/* ── WEATHER (for most upcoming hike) ── */}
         {upcomingHike && <HikeWeatherWidget hike={upcomingHike} />}
 
         {/* ── QUICK ACTIONS ── */}

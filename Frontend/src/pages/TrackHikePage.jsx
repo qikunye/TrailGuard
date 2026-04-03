@@ -123,7 +123,12 @@ function TrailHazards({ trailId, uid }) {
 
   if (!trailId) return null;
 
-  const activeCount = condition?.activeHazardCounts ?? 0;
+  const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
+  const condWithin24h = condition?.lastUpdated
+    ? new Date(condition.lastUpdated).getTime() >= cutoff24h
+    : false;
+
+  const activeCount = condWithin24h ? (condition?.activeHazardCounts ?? 0) : 0;
   const highestSev  = condition?.highestSeverity ?? "none";
   const hazardTypes = condition?.hazardTypes ?? [];
   const opStatus    = condition?.operationalStatus ?? "";

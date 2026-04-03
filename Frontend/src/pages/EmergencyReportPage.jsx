@@ -44,17 +44,17 @@ export default function EmergencyReportPage() {
       return saved?.status === "tracking";
     } catch { return false; }
   })();
-  const upcomingKey  = uid ? `upcomingHike_${uid}` : null;
-  const upcomingHike = (() => {
-    if (!upcomingKey) return {};
-    try { return JSON.parse(localStorage.getItem(upcomingKey)) ?? {}; } catch { return {}; }
+  // Use the hike that is currently being tracked (activeTrack), not just the last registered
+  const activeHike = (() => {
+    if (!uid) return {};
+    try { return JSON.parse(localStorage.getItem(`activeTrack_${uid}`))?.selectedHike ?? {}; } catch { return {}; }
   })();
 
   const prefillUserId  = profile.userId ?? null;
   const prefillPhone   = profile.phone  ?? "";
-  const prefillTrailId = upcomingHike.selectedTrailId ?? null;
-  const prefillTrailName = upcomingHike.startLocation && upcomingHike.endLocation
-    ? `${upcomingHike.startLocation} → ${upcomingHike.endLocation}`
+  const prefillTrailId = activeHike.selectedTrailId ?? null;
+  const prefillTrailName = activeHike.startLocation && activeHike.endLocation
+    ? `${activeHike.startLocation} → ${activeHike.endLocation}`
     : null;
 
   // ── Resolve GPS coords to human-readable address ──────────────────────────
