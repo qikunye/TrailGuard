@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import Navbar from "../components/shared/Navbar.jsx";
 import { useProfile } from "../hooks/useProfile.js";
 import { kongFetch } from "../lib/kongClient.js";
+import { getAllHazards } from "../services/hazardService.js";
 
 const HIKE_URL             = import.meta.env.VITE_HIKE_URL             ?? "http://localhost:8080/api/completed";
 const INCIDENT_URL         = import.meta.env.VITE_INCIDENT_URL         ?? "http://localhost:8080/api/incident";
@@ -92,23 +93,29 @@ function TrailHazards({ trailId, uid }) {
   const [condLoading,     setCondLoading]     = useState(false);
   const [reportedHazards, setReportedHazards] = useState([]);
 
-  // Load from localStorage reactively — re-runs whenever uid or trailId changes
+  // Fetch all hazard reports from the backend (all users) for this trail
   useEffect(() => {
-    if (!uid || !trailId) { setReportedHazards([]); return; }
-    const readHazards = () => {
-      try {
-        const all    = JSON.parse(localStorage.getItem(`reportedHazards_${uid}`) ?? "[]");
-        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-        setReportedHazards(all.filter(
-          h => String(h.trailId) === String(trailId) && new Date(h.reportedAt).getTime() >= cutoff
-        ));
-      } catch { setReportedHazards([]); }
+    if (!trailId) { setReportedHazards([]); return; }
+    let cancelled = false;
+    const fetchHazards = () => {
+      getAllHazards()
+        .then(data => {
+          if (cancelled) return;
+          const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+          const filtered = (data.hazards ?? []).filter(
+            h => String(h.trailId) === String(trailId)
+              && h.reportedAt && new Date(h.reportedAt).getTime() >= cutoff
+              && h.status === "ACTIVE"
+          );
+          setReportedHazards(filtered);
+        })
+        .catch(() => { if (!cancelled) setReportedHazards([]); });
     };
-    readHazards();
-    // Re-read when the page regains focus (user returns after reporting a hazard)
-    window.addEventListener("focus", readHazards);
-    return () => window.removeEventListener("focus", readHazards);
-  }, [uid, trailId]);
+    fetchHazards();
+    // Re-fetch when the page regains focus (user returns after reporting a hazard)
+    window.addEventListener("focus", fetchHazards);
+    return () => { cancelled = true; window.removeEventListener("focus", fetchHazards); };
+  }, [trailId]);
 
   // Fetch static trail condition data (trails 3 & 9 have known hazards)
   useEffect(() => {
@@ -181,9 +188,9 @@ function TrailHazards({ trailId, uid }) {
             </div>
           )}
 
-          {/* User-reported hazards */}
+          {/* User-reported hazards (from all users via backend) */}
           {reportedHazards.map((h) => (
-            <div key={h.id} className="bg-white/[0.03] border border-amber/20 rounded-2xl px-4 py-3.5">
+            <div key={h.hazardId ?? h.id} className="bg-white/[0.03] border border-amber/20 rounded-2xl px-4 py-3.5">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1">

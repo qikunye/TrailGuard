@@ -252,6 +252,7 @@ services:
       - "5050"
     environment:
       - PORT=5050
+      - PYTHONUNBUFFERED=1
     env_file:
       - ./Services/.env
     volumes:

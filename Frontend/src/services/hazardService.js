@@ -17,6 +17,16 @@ export async function submitHazardReport(data) {
 }
 
 /**
+ * GET /hazards  →  Report Ingestion Service (port 8010)
+ * Returns all hazard reports from all users.
+ */
+export async function getAllHazards() {
+  const res = await kongFetch(`${HAZARD_REPORT_URL}/hazards`);
+  if (!res.ok) throw new Error("Failed to fetch hazards");
+  return res.json();
+}
+
+/**
  * POST /alternative-route  →  Alternative Route Service (port 8009)
  */
 export async function getAlternativeRoutes(data) {
