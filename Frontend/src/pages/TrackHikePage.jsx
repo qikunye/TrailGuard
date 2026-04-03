@@ -88,60 +88,60 @@ const COND_SEV_COLOR = (s = "") => {
 
 // ── Active trail hazards (from Trail Condition Service + user-reported) ────────
 function TrailHazards({ trailId, uid }) {
-  const [condition, setCondition] = useState(null);
-  const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState(null);
+  const [condition,       setCondition]       = useState(null);
+  const [condLoading,     setCondLoading]     = useState(false);
+  const [reportedHazards, setReportedHazards] = useState([]);
 
+  // Load from localStorage reactively — re-runs whenever uid or trailId changes
+  useEffect(() => {
+    if (!uid || !trailId) { setReportedHazards([]); return; }
+    const readHazards = () => {
+      try {
+        const all    = JSON.parse(localStorage.getItem(`reportedHazards_${uid}`) ?? "[]");
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        setReportedHazards(all.filter(
+          h => String(h.trailId) === String(trailId) && new Date(h.reportedAt).getTime() >= cutoff
+        ));
+      } catch { setReportedHazards([]); }
+    };
+    readHazards();
+    // Re-read when the page regains focus (user returns after reporting a hazard)
+    window.addEventListener("focus", readHazards);
+    return () => window.removeEventListener("focus", readHazards);
+  }, [uid, trailId]);
+
+  // Fetch static trail condition data (trails 3 & 9 have known hazards)
   useEffect(() => {
     if (!trailId) return;
-    setLoading(true);
-    setError(null);
+    setCondLoading(true);
     kongFetch(`${TRAIL_CONDITION_URL}/Condition/${trailId}`)
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(data => setCondition(data))
-      .catch(err => { console.error("[TrailHazards]", err); setError(err.message); })
-      .finally(() => setLoading(false));
+      .catch(() => {})
+      .finally(() => setCondLoading(false));
   }, [trailId]);
 
-  // Read user-reported hazards from localStorage (last 24 hours, matching this trail)
-  const reportedHazards = (() => {
-    if (!uid || !trailId) return [];
-    try {
-      const all = JSON.parse(localStorage.getItem(`reportedHazards_${uid}`) ?? "[]");
-      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-      return all.filter(
-        h => String(h.trailId) === String(trailId) && new Date(h.reportedAt).getTime() >= cutoff
-      );
-    } catch { return []; }
-  })();
-
   if (!trailId) return null;
-  if (loading) return (
-    <div className="mt-6 flex items-center gap-2 text-xs text-muted px-1">
-      <div className="w-3 h-3 border border-muted border-t-transparent rounded-full animate-spin" />
-      Loading trail hazards…
-    </div>
-  );
 
-  const activeCount  = condition?.activeHazardCounts ?? 0;
-  const highestSev   = condition?.highestSeverity ?? "none";
-  const hazardTypes  = condition?.hazardTypes ?? [];
-  const opStatus     = condition?.operationalStatus ?? "";
+  const activeCount = condition?.activeHazardCounts ?? 0;
+  const highestSev  = condition?.highestSeverity ?? "none";
+  const hazardTypes = condition?.hazardTypes ?? [];
+  const opStatus    = condition?.operationalStatus ?? "";
 
-  const totalCount = activeCount + reportedHazards.length;
-  const hasAny = totalCount > 0;
+  const hasAny = reportedHazards.length > 0 || activeCount > 0;
 
   return (
     <div className="mt-6">
-      <p className="text-xs text-muted uppercase tracking-widest mb-3">Active Hazards on This Trail</p>
-      {error && !reportedHazards.length ? (
-        <p className="text-xs text-muted px-1">Could not load — {error}</p>
-      ) : !hasAny ? (
+      <div className="flex items-center gap-2 mb-3">
+        <p className="text-xs text-muted uppercase tracking-widest">Active Hazards on This Trail</p>
+        {condLoading && <div className="w-2.5 h-2.5 border border-muted border-t-transparent rounded-full animate-spin" />}
+      </div>
+      {!hasAny && !condLoading ? (
         <div className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5 flex items-center gap-3">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
           <p className="text-sm text-muted">No active hazards on this trail.</p>
         </div>
-      ) : (
+      ) : hasAny ? (
         <div className="flex flex-col gap-2">
           {/* Static trail condition hazards */}
           {activeCount > 0 && (
@@ -200,7 +200,7 @@ function TrailHazards({ trailId, uid }) {
             </div>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
