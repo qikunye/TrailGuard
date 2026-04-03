@@ -226,11 +226,21 @@ export default function ProfilePage() {
               </div>
               <div className="flex items-start gap-3">
                 <span className="text-primary font-bold text-sm shrink-0 w-5 text-center">2</span>
-                <p className="text-sm text-fg">Start a chat and send the command <span className="font-mono font-semibold text-primary">/register</span> followed by your phone number (e.g. <span className="font-mono text-muted">/register +6591234567</span>)</p>
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-sm text-fg">
+                    Send the command below, replacing <span className="font-mono text-amber-400">YOUR_ID</span> with your User ID (shown in Account above) and <span className="font-mono text-amber-400">+65XXXXXXXX</span> with your phone:
+                  </p>
+                  <div className="font-mono text-sm bg-[#0d1410] border border-line rounded-lg px-3 py-2 text-primary select-all">
+                    /register {profile.userId ? profile.userId : <span className="text-amber-400">YOUR_ID</span>} +65XXXXXXXX
+                  </div>
+                  <p className="text-[0.75rem] text-muted">
+                    Including your User ID is required so nearby-hiker alerts reach you correctly.
+                  </p>
+                </div>
               </div>
               <div className="flex items-start gap-3">
                 <span className="text-primary font-bold text-sm shrink-0 w-5 text-center">3</span>
-                <p className="text-sm text-fg">The bot will confirm once your number is linked — you'll receive trail hazard and emergency alerts directly in Telegram</p>
+                <p className="text-sm text-fg">The bot will confirm once linked — you'll receive trail hazard and emergency alerts directly in Telegram</p>
               </div>
             </div>
           </div>

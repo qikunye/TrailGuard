@@ -147,9 +147,11 @@ def _handle_bot_update(update: dict):
     if text.startswith("/start"):
         _tg_send(chat_id, (
             f"👋 Hi {username}! I'm the <b>TrailGuard</b> alert bot.\n\n"
-            "To receive emergency and hazard alerts personally, link your phone number:\n\n"
-            "<code>/register +6512345678</code>\n\n"
-            "Use the same number registered in your TrailGuard profile."
+            "To receive emergency and hazard alerts, link your TrailGuard account:\n\n"
+            "<code>/register YOUR_USER_ID +6512345678</code>\n\n"
+            "Find your User ID on your TrailGuard profile page (e.g. <code>/register 46 +6591234567</code>).\n\n"
+            "⚠️ <b>Both your User ID and phone number are required</b> — without the User ID, "
+            "nearby-hiker and hazard broadcast alerts won't reach you."
         ))
 
     elif text.startswith("/register"):
@@ -164,9 +166,9 @@ def _handle_bot_update(update: dict):
         else:
             _tg_send(chat_id, (
                 "❌ Invalid format. Use:\n\n"
-                "<code>/register +6512345678</code>\n"
-                "or include your TrailGuard user ID:\n"
-                "<code>/register 46 +6512345678</code>\n\n"
+                "<code>/register YOUR_USER_ID +6512345678</code>\n\n"
+                "Example: <code>/register 46 +6591234567</code>\n\n"
+                "Find your User ID on your TrailGuard profile page. "
                 "Include country code (e.g. +65 for Singapore)."
             ))
             return
