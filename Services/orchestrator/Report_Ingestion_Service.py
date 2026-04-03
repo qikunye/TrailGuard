@@ -59,6 +59,7 @@ app.add_middleware(
 TRAIL_CONDITION_URL    = os.getenv("TRAIL_CONDITION_URL",    "http://localhost:8002")
 NOTIFICATION_URL       = os.getenv("NOTIFICATION_URL",       "http://localhost:5050")
 ALTERNATIVE_ROUTE_URL  = os.getenv("ALTERNATIVE_ROUTE_URL",  "http://localhost:8009")
+NEARBY_USERS_URL       = os.getenv("NEARBY_USERS_URL",       "http://localhost:5005")
 
 TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
@@ -176,35 +177,47 @@ async def report_hazard(report: HazardReport):
         HAZARD_STORE[hazard_id] = hazard_record
         log.info("Step 1 ✓ Hazard persisted | hazardId=%s", hazard_id)
 
-        # ── Step 2: Get trail operational status ──────────────────────────────
+        # ── Step 2: Get trail operational status + name ───────────────────────
         log.info("Step 2 – Fetching trail conditions for trailId=%s", report.trailId)
+        trail_name = f"Trail #{report.trailId}"
         try:
             conditions = await _get(
                 client,
                 f"{TRAIL_CONDITION_URL}/trail/{report.trailId}/conditions",
             )
             operational_status = conditions.get("operationalStatus", "OPEN")
+            trail_name = conditions.get("name", trail_name)
         except HTTPException:
             log.warning("Trail Condition Service unavailable — defaulting to CAUTION")
             operational_status = "CAUTION"
 
         # Update hazard record with the trail's current status
         HAZARD_STORE[hazard_id]["operationalStatus"] = operational_status
-        log.info("Step 2 ✓ operationalStatus=%s", operational_status)
+        log.info("Step 2 ✓ operationalStatus=%s trailName=%s", operational_status, trail_name)
 
-        # ── Step 3: Broadcast SMS to active hikers on the trail ───────────────
-        log.info("Step 3 – Broadcasting hazard alert to active hikers on trailId=%s", report.trailId)
+        # ── Step 3: Fetch active hikers on the trail, then broadcast ─────────
+        log.info("Step 3 – Fetching nearby users for trailId=%s", report.trailId)
+        nearby_user_ids: list[int] = []
+        try:
+            nearby_data = await _get(client, f"{NEARBY_USERS_URL}/getNearby/{report.trailId}")
+            nearby_user_ids = nearby_data.get("nearbyUserIds", [])
+            log.info("Step 3 – Found %d active hikers on trail", len(nearby_user_ids))
+        except HTTPException:
+            log.warning("Step 3 – Nearby Users Service unavailable")
+
+        log.info("Step 3 – Broadcasting hazard alert to %d hikers", len(nearby_user_ids))
         broadcast_payload = {
-            "userIds":           [],   # populated from active hiker DB in production
-            "phones":            [],   # populated from active hiker DB in production
+            "userIds":           nearby_user_ids,
+            "phones":            [],   # phones resolved from Telegram registry in notification wrapper
             "trailId":           report.trailId,
+            "trailName":         trail_name,
             "operationalStatus": operational_status,
             "hazardType":        report.hazardType,
             "severity":          report.severity,
         }
         try:
             await _post(client, f"{NOTIFICATION_URL}/broadcast", broadcast_payload)
-            log.info("Step 3 ✓ Broadcast sent")
+            log.info("Step 3 ✓ Broadcast sent to %d hikers", len(nearby_user_ids))
         except HTTPException as e:
             log.warning("Step 3 ✗ Broadcast failed (non-fatal): %s", e.detail)
 

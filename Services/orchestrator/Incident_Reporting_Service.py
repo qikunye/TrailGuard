@@ -59,6 +59,7 @@ class ContactEntry(BaseModel):
 
 class IncidentRequest(BaseModel):
     userId:      int   = Field(..., example=1)
+    hikerName:   str   = Field("", example="Alice Tan")
     hikerPhone:  str   = Field(..., example="+6583355100")
     trailId:     int   = Field(..., example=1)
     severity:    int   = Field(..., ge=1, le=5, example=3)
@@ -185,8 +186,9 @@ async def report_incident(req: IncidentRequest):
             try:
                 data = await _get(client, f"{NEARBY_USERS_URL}/getNearby/{req.trailId}")
                 # OutSystems HikeProgressAPI returns nearbyUserIds (IDs only, no phone numbers)
+                # userId is included so the notification wrapper can look up Telegram chat IDs
                 user_ids = data.get("nearbyUserIds", [])
-                return [{"name": f"Hiker {uid}", "phone": ""} for uid in user_ids]
+                return [{"name": f"Hiker {uid}", "phone": "", "userId": uid} for uid in user_ids]
             except HTTPException:
                 log.warning("Nearby Users Service unavailable for trailId=%s", req.trailId)
                 return []
@@ -208,12 +210,16 @@ async def report_incident(req: IncidentRequest):
                  len(emergency_contacts), len(outsystems_contacts),
                  len(req.localEmergencyContacts), len(nearby_users))
 
+        hiker_display = req.hikerName or f"Hiker {req.userId}"
+
         # ── Step 4: Notify emergency contacts ─────────────────────────────────
         log.info("Step 4 – Notifying %d emergency contact(s)", len(emergency_contacts))
         contact_delivery = []
         if emergency_contacts:
             alert_payload = {
                 "hikerId":           str(req.userId),
+                "hikerName":         hiker_display,
+                "address":           address,
                 "lat":               req.lat,
                 "lng":               req.lng,
                 "emergencyContacts": emergency_contacts,
@@ -228,18 +234,19 @@ async def report_incident(req: IncidentRequest):
         log.info("Step 4 ✓ contactDelivery=%s", contact_delivery)
 
         # ── Step 6: Notify nearby hikers ──────────────────────────────────────
-        # OutSystems only returns user IDs — filter to those with phone numbers
-        notifiable_nearby = [u for u in nearby_users if u.get("phone")]
-        log.info("Step 6 – Nearby hikers: %d total, %d with phone numbers",
-                 len(nearby_users), len(notifiable_nearby))
+        # Pass all nearby users (with userId) so the notification wrapper can reach
+        # those registered with the Telegram bot even if phone is unavailable.
+        log.info("Step 6 – Notifying %d nearby hiker(s)", len(nearby_users))
         nearby_delivery = []
-        if notifiable_nearby:
+        if nearby_users:
             nearby_payload = {
                 "hikerId":           str(req.userId),
+                "hikerName":         hiker_display,
+                "address":           address,
                 "lat":               req.lat,
                 "lng":               req.lng,
                 "emergencyContacts": [],
-                "nearbyHikers":      notifiable_nearby,
+                "nearbyHikers":      nearby_users,
                 "message":           _nearby_hiker_sms(req, address),
             }
             try:
@@ -248,6 +255,9 @@ async def report_incident(req: IncidentRequest):
             except HTTPException:
                 log.warning("Notification Wrapper unavailable – nearby hikers not notified")
         log.info("Step 6 ✓ nearbyDelivery=%s", nearby_delivery)
+
+        # Count how many nearby hikers were actually reached (SMS or Telegram)
+        nearby_reached = len([d for d in nearby_delivery if d.get("twilioStatus") not in ("failed", None, "skipped") or d.get("telegramStatus") == "sent"])
 
         # ── Step 7: Persist incident in Firestore via Trail Incident Service ───
         log.info("Step 7 – Persisting incident to Trail Incident Service")
@@ -272,17 +282,19 @@ async def report_incident(req: IncidentRequest):
             incident_id = f"INC-{req.userId}-{int(datetime.utcnow().timestamp())}"
         log.info("Step 7 ✓ incidentId=%s", incident_id)
 
-        # ── Step 8: Send confirmation SMS to the hiker ────────────────────────
-        log.info("Step 8 – Sending confirmation SMS to hiker")
+        # ── Step 8: Send confirmation to the hiker ────────────────────────────
+        log.info("Step 8 – Sending confirmation to hiker")
         try:
             confirmation_payload = {
                 "hikerId":           str(req.userId),
+                "hikerName":         hiker_display,
+                "address":           address,
                 "lat":               req.lat,
                 "lng":               req.lng,
                 "emergencyContacts": [{"name": "You", "phone": req.hikerPhone}],
                 "nearbyHikers":      [],
                 "message":           _hiker_confirmation_sms(
-                                        req, len(emergency_contacts), len(nearby_users)
+                                        req, len(emergency_contacts), nearby_reached
                                      ),
             }
             await _post(client, f"{NOTIFICATION_URL}/notify", confirmation_payload)

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import CustomSelect from "../shared/CustomSelect.jsx";
 
 const INJURY_TYPES = [
   "Sprain / Strain", "Fracture / Broken Bone", "Laceration / Cut",
@@ -105,20 +106,17 @@ export default function IncidentReportForm({
       {/* Injury Type */}
       <div className="mb-4">
         <label className={lbl}>Injury Type</label>
-        <div className={`${wrap} pr-4`}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={icon}>
-            <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-          </svg>
-          <select
-            value={injuryType}
-            onChange={e => setInjuryType(e.target.value)}
-            required
-            className="flex-1 bg-transparent border-none outline-none text-[0.92rem] py-3 cursor-pointer text-fg"
-          >
-            <option value="" disabled className="bg-card">Select injury type</option>
-            {INJURY_TYPES.map(t => <option key={t} value={t} className="bg-card">{t}</option>)}
-          </select>
-        </div>
+        <CustomSelect
+          value={injuryType}
+          onChange={setInjuryType}
+          options={INJURY_TYPES}
+          placeholder="Select injury type"
+          icon={
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            </svg>
+          }
+        />
       </div>
 
       {/* Description */}
