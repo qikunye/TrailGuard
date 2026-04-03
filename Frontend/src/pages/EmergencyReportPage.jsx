@@ -67,7 +67,8 @@ export default function EmergencyReportPage() {
     const localContacts = (profile.emergencyContacts ?? [])
       .filter(c => c.name && c.phone)
       .map(c => ({ name: c.name, phone: c.phone, relation: c.relation ?? "" }));
-    const result = await submitReport({ ...data, severity, photoUrl, localEmergencyContacts: localContacts });
+    const hikerName = profile.displayName || profile.name || `Hiker ${profile.userId ?? data.userId}`;
+    const result = await submitReport({ ...data, severity, photoUrl, hikerName, localEmergencyContacts: localContacts });
     if (result) {
       navigate("/emergency/confirm", { state: { result, notifiedContacts: localContacts } });
     }

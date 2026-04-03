@@ -243,7 +243,7 @@ services:
     networks:
       - trailguard
 
-  # ─── Notification Wrapper (Twilio SMS) ──────────────────────
+  # ─── Notification Wrapper (Twilio SMS + Telegram) ───────────
   notification-wrapper:
     build:
       context: ./Services
@@ -254,6 +254,8 @@ services:
       - PORT=5050
     env_file:
       - ./Services/.env
+    volumes:
+      - telegram_registry:/app/data
     networks:
       - trailguard
     restart: unless-stopped
@@ -367,12 +369,14 @@ services:
       - TRAIL_CONDITION_URL=http://trail-condition:8002
       - NOTIFICATION_URL=http://notification-wrapper:5050
       - ALTERNATIVE_ROUTE_URL=http://alternative-route:8009
+      - NEARBY_USERS_URL=http://nearby-users:5005
     env_file:
       - ./Services/.env
     depends_on:
       - trail-condition
       - notification-wrapper
       - alternative-route
+      - nearby-users
     networks:
       - trailguard
     restart: unless-stopped
@@ -406,3 +410,4 @@ networks:
 
 volumes:
   grafana-data:
+  telegram_registry:

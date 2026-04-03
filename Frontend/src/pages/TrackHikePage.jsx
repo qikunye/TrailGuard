@@ -955,7 +955,7 @@ export default function TrackHikePage() {
         )}
 
         {/* ── ACTION BUTTONS ── */}
-        <div className="flex gap-3 mb-10">
+        <div className="flex gap-3 mt-6 mb-10">
           {status === "idle" && (
             <button
               onClick={startTracking}

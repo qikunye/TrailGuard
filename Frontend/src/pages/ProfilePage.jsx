@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/shared/Navbar.jsx";
+import CustomSelect from "../components/shared/CustomSelect.jsx";
 import { useAuth } from "../hooks/useAuth.js";
 import { useProfile } from "../hooks/useProfile.js";
 import { deriveExpLevel } from "../hooks/useAssessment.js";
@@ -194,6 +195,46 @@ export default function ProfilePage() {
             </div>
           </div>
 
+          {/* ── Telegram Notifications ── */}
+          <div className="bg-card border border-line rounded-2xl p-6 mb-4">
+            <div className="flex items-center gap-2 mb-1">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary shrink-0">
+                <path d="M21.5 2L2 9.3l7.3 2.7 2.7 7.3L21.5 2z"/>
+                <path d="M9.3 12l4.5 4.5"/>
+              </svg>
+              <h2 className="text-[0.95rem] font-semibold text-fg">Telegram Notifications</h2>
+            </div>
+            <p className="text-xs text-muted mb-4">Get real-time trail alerts &amp; emergency updates via Telegram</p>
+            <div className="bg-surface rounded-xl border border-line p-4 flex flex-col gap-3">
+              <div className="flex items-start gap-3">
+                <span className="text-primary font-bold text-sm shrink-0 w-5 text-center">1</span>
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm text-fg">Open Telegram and search for <span className="font-mono font-semibold text-primary">@trail_guardbot</span>, or tap the button below to open it directly:</p>
+                  <a
+                    href="https://t.me/trail_guardbot"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 self-start px-4 py-2 bg-[#229ED9]/10 border border-[#229ED9]/30 text-[#229ED9] rounded-full text-sm font-semibold no-underline hover:bg-[#229ED9]/20 transition-colors"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21.5 2L2 9.3l7.3 2.7 2.7 7.3L21.5 2z"/>
+                      <path d="M9.3 12l4.5 4.5"/>
+                    </svg>
+                    Open @trail_guardbot
+                  </a>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-primary font-bold text-sm shrink-0 w-5 text-center">2</span>
+                <p className="text-sm text-fg">Start a chat and send the command <span className="font-mono font-semibold text-primary">/register</span> followed by your phone number (e.g. <span className="font-mono text-muted">/register +6591234567</span>)</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-primary font-bold text-sm shrink-0 w-5 text-center">3</span>
+                <p className="text-sm text-fg">The bot will confirm once your number is linked — you'll receive trail hazard and emergency alerts directly in Telegram</p>
+              </div>
+            </div>
+          </div>
+
           {/* ── Hiker Info ── */}
           <div className="bg-card border border-line rounded-2xl p-6 mb-4">
             <h2 className="text-[0.95rem] font-semibold text-fg mb-1">Hiker Info</h2>
@@ -202,14 +243,15 @@ export default function ProfilePage() {
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div>
                 <label className={lbl}>Fitness Level</label>
-                <div className={`${wrap} pr-4`}>
-                  <select value={form.fitnessLevel} onChange={e => set("fitnessLevel", e.target.value)}
-                    className="flex-1 bg-transparent border-none outline-none text-fg text-[0.9rem] py-3 cursor-pointer">
-                    {[["low","Low — casual walker"],["medium","Medium — regular hiker"],["high","High — trained athlete"]].map(([v,l]) => (
-                      <option key={v} value={v} className="bg-card">{l}</option>
-                    ))}
-                  </select>
-                </div>
+                <CustomSelect
+                  value={form.fitnessLevel}
+                  onChange={val => set("fitnessLevel", val)}
+                  options={[
+                    { value: "low",    label: "Low — casual walker" },
+                    { value: "medium", label: "Medium — regular hiker" },
+                    { value: "high",   label: "High — trained athlete" },
+                  ]}
+                />
               </div>
 
               <div>
