@@ -15,6 +15,7 @@ OutSystems TrailConditionAPI quirks (as observed):
 import os
 import httpx
 import logging
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -213,6 +214,7 @@ async def get_condition(trail_id: str):
         "activeHazardCounts": (local or {}).get("activeHazards", 0),
         "highestSeverity":    _highest_severity(hazard_details),
         "hazardTypes":        list({h["type"] for h in hazard_details}),
+        "lastUpdated":        datetime.now(timezone.utc).isoformat(),
         "Success": True, "ErrorCode": 0, "ErrorMessage": "",
     }
 
