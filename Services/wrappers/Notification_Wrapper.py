@@ -87,8 +87,26 @@ def register_phone(phone: str, chat_id: int, user_id: str | None = None):
     log.info("Registered phone=%s userId=%s → chat_id=%s", phone, user_id, chat_id)
 
 
+def _normalize_phone(phone: str) -> list[str]:
+    """Return possible registry keys for a phone number to handle format mismatches."""
+    candidates = [phone]
+    digits = phone.lstrip("+")
+    # If missing country code, try with +65 (Singapore)
+    if not digits.startswith("65") and len(digits) == 8:
+        candidates.append(f"+65{digits}")
+    # If has country code, also try without
+    if digits.startswith("65") and len(digits) > 8:
+        candidates.append(f"+{digits}")
+        candidates.append(f"+{digits[2:]}")
+    return candidates
+
+
 def chat_id_for_phone(phone: str) -> int | None:
-    return _load_registry().get(phone)
+    registry = _load_registry()
+    for candidate in _normalize_phone(phone):
+        if candidate in registry:
+            return registry[candidate]
+    return None
 
 
 def chat_id_for_user_id(user_id) -> int | None:

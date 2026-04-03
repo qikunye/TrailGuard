@@ -188,7 +188,14 @@ async def report_incident(req: IncidentRequest):
                 # OutSystems HikeProgressAPI returns nearbyUserIds (IDs only, no phone numbers)
                 # userId is included so the notification wrapper can look up Telegram chat IDs
                 user_ids = data.get("nearbyUserIds", [])
-                return [{"name": f"Hiker {uid}", "phone": "", "userId": uid} for uid in user_ids]
+                # Deduplicate and exclude the reporting hiker
+                seen = set()
+                unique_ids = []
+                for uid in user_ids:
+                    if uid not in seen and uid != req.userId:
+                        seen.add(uid)
+                        unique_ids.append(uid)
+                return [{"name": f"Hiker {uid}", "phone": "", "userId": uid} for uid in unique_ids]
             except HTTPException:
                 log.warning("Nearby Users Service unavailable for trailId=%s", req.trailId)
                 return []
