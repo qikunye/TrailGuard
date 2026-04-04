@@ -9,8 +9,8 @@ Flow:
     ← UI sends: {hikerId, trailId, mountainId, hazardType, severity,
                  hazardLat, hazardLng, currentLat, currentLng, description, photoUrl}
 
-  Step 1 – Persist hazard report
-    Stores the hazard in the in-memory hazard store (DB in production).
+  Step 1 / Step 6 – Persist hazard report
+    POST /CreateReport → Trail Condition Service (Trail Hazards DB)
 
   Step 2 – Get trail operational status
     GET /trail/{trailId}/conditions → Trail Condition Service
@@ -66,9 +66,6 @@ ALTERNATIVE_ROUTE_URL  = os.getenv("ALTERNATIVE_ROUTE_URL",  "http://localhost:8
 NEARBY_USERS_URL       = os.getenv("NEARBY_USERS_URL",       "http://localhost:5005")
 
 TIMEOUT = httpx.Timeout(15.0, connect=5.0)
-
-# ── In-memory hazard store (replace with DB in production) ───────────────────
-HAZARD_STORE: dict[str, dict] = {}
 
 # ── Operational statuses that trigger rerouting ───────────────────────────────
 REROUTE_STATUSES = {"CAUTION", "CLOSED"}
@@ -161,7 +158,8 @@ async def report_hazard(report: HazardReport):
 
     async with httpx.AsyncClient() as client:
 
-        # ── Step 1: Persist hazard report ─────────────────────────────────────
+        # ── Step 1 / Step 6: Persist hazard report to Trail Hazards DB ──────────
+        reported_at = datetime.utcnow().isoformat() + "Z"
         hazard_record = {
             "hazardId":    hazard_id,
             "hikerId":     report.hikerId,
@@ -175,11 +173,26 @@ async def report_hazard(report: HazardReport):
             "currentLng":  report.currentLng,
             "description": report.description,
             "photoUrl":    report.photoUrl,
-            "reportedAt":  datetime.utcnow().isoformat() + "Z",
+            "reportedAt":  reported_at,
             "status":      "ACTIVE",
         }
-        HAZARD_STORE[hazard_id] = hazard_record
-        log.info("Step 1 ✓ Hazard persisted | hazardId=%s", hazard_id)
+        try:
+            result = await _post(client, f"{TRAIL_CONDITION_URL}/CreateReport", {
+                "userId":      report.hikerId,
+                "trailId":     report.trailId,
+                "hazardType":  report.hazardType,
+                "description": report.description,
+                "severity":    report.severity,
+                "photo":       report.photoUrl,
+                "latitude":    report.hazardLat,
+                "longitude":   report.hazardLng,
+            })
+            hazard_id = result.get("hazard_id", hazard_id)
+            reported_at = result.get("reported_at", reported_at)
+            hazard_record["hazardId"] = hazard_id
+            log.info("Step 1 ✓ Hazard persisted to Trail Hazards DB | hazardId=%s", hazard_id)
+        except HTTPException as e:
+            log.warning("Step 1 ✗ Trail Hazards DB persist failed (non-fatal): %s", e.detail)
 
         # ── Step 2: Get trail operational status + name ───────────────────────
         log.info("Step 2 – Fetching trail conditions for trailId=%s", report.trailId)
@@ -195,8 +208,6 @@ async def report_hazard(report: HazardReport):
             log.warning("Trail Condition Service unavailable — defaulting to CAUTION")
             operational_status = "CAUTION"
 
-        # Update hazard record with the trail's current status
-        HAZARD_STORE[hazard_id]["operationalStatus"] = operational_status
         log.info("Step 2 ✓ operationalStatus=%s trailName=%s", operational_status, trail_name)
 
         # ── Step 3: Fetch active hikers on the trail, then broadcast ─────────
@@ -228,14 +239,16 @@ async def report_hazard(report: HazardReport):
         # ── Step 15: Update trail condition based on reported severity ───────
         log.info("Step 15 – Updating trail condition for trailId=%s", report.trailId)
         severity_to_status = {5: "CLOSED", 4: "CLOSED", 3: "CAUTION", 2: "CAUTION"}
+        severity_to_label  = {1: "minor", 2: "moderate", 3: "moderate", 4: "severe", 5: "critical"}
         new_trail_status = severity_to_status.get(report.severity, operational_status)
         update_condition_payload = {
-            "operationalStatus":    new_trail_status,
-            "highestSeverityActive": str(report.severity),
-            "hazardCountActive":    1,
-            "hazardType":           report.hazardType,
-            "location":             f"{report.hazardLat:.5f}, {report.hazardLng:.5f}",
-            "updatedAt":            datetime.utcnow().isoformat() + "Z",
+            "operationalStatus":     new_trail_status,
+            "highestSeverityActive": severity_to_label.get(report.severity, "minor"),
+            "hazardCountActive":     1,
+            "hazardType":            report.hazardType,
+            "location":              "reported location",
+            "description":           report.description or "",
+            "updatedAt":             datetime.utcnow().isoformat() + "Z",
         }
         try:
             await _post(
@@ -244,7 +257,6 @@ async def report_hazard(report: HazardReport):
                 update_condition_payload,
             )
             operational_status = new_trail_status
-            HAZARD_STORE[hazard_id]["operationalStatus"] = operational_status
             log.info("Step 15 ✓ Trail condition updated → %s", operational_status)
         except HTTPException as e:
             log.warning("Step 15 ✗ Trail condition update failed (non-fatal): %s", e.detail)
@@ -317,22 +329,10 @@ async def update_recommendation(rec: RecommendationUpdate):
         rec.originalTrailId, rec.recommendedTrailId,
     )
 
-    # Find the matching hazard record by trailId
-    matching = [
-        h for h in HAZARD_STORE.values()
-        if h["trailId"] == rec.originalTrailId and h["hikerId"] == rec.hikerId
-    ]
-
-    if matching:
-        latest = sorted(matching, key=lambda h: h["reportedAt"], reverse=True)[0]
-        latest["recommendation"] = {
-            "recommendedTrailId":      rec.recommendedTrailId,
-            "recommendedTrailName":    rec.recommendedTrailName,
-            "routeDistanceMeters":     rec.routeDistanceMeters,
-            "estimatedTravelTimeMins": rec.estimatedTravelTimeMins,
-            "updatedAt":               datetime.utcnow().isoformat() + "Z",
-        }
-        log.info("✓ Hazard record updated with recommendation | hazardId=%s", latest["hazardId"])
+    log.info(
+        "✓ Recommendation logged | originalTrailId=%s recommendedTrailId=%s",
+        rec.originalTrailId, rec.recommendedTrailId,
+    )
 
     return {
         "status":              "updated",
@@ -344,23 +344,13 @@ async def update_recommendation(rec: RecommendationUpdate):
     }
 
 
-# ── Get stored hazard reports ─────────────────────────────────────────────────
+# ── Get hazard reports for a trail (proxied to Trail Condition Service) ───────
 
-@app.get("/hazards", tags=["Hazard Report"])
-async def get_all_hazards():
-    """Returns all ingested hazard reports. In production this would query the DB."""
-    return {
-        "count":   len(HAZARD_STORE),
-        "hazards": list(HAZARD_STORE.values()),
-    }
-
-
-@app.get("/hazards/{hazard_id}", tags=["Hazard Report"])
-async def get_hazard(hazard_id: str):
-    hazard = HAZARD_STORE.get(hazard_id)
-    if not hazard:
-        raise HTTPException(status_code=404, detail=f"Hazard '{hazard_id}' not found.")
-    return hazard
+@app.get("/hazards/trail/{trail_id}", tags=["Hazard Report"])
+async def get_hazards_by_trail(trail_id: str):
+    """Returns all active hazards for a trail, fetched from Trail Hazards DB."""
+    async with httpx.AsyncClient() as client:
+        return await _get(client, f"{TRAIL_CONDITION_URL}/hazards/trail/{trail_id}")
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

@@ -13,7 +13,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-const KONG_API_KEY = import.meta.env.VITE_KONG_API_KEY ?? "tg-dev-key-local-only";
+const KONG_API_KEY = import.meta.env.VITE_KONG_API_KEY || "tg-dev-key-local-only";
 const KONG_BASE    = import.meta.env.VITE_KONG_BASE_URL ?? "http://localhost:8080";
 
 /**

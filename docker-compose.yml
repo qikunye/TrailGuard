@@ -94,10 +94,21 @@ services:
     build:
       context: ./Frontend
       dockerfile: Dockerfile
+      args:
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID}
+        VITE_FIREBASE_STORAGE_BUCKET: ${VITE_FIREBASE_STORAGE_BUCKET}
+        VITE_FIREBASE_MESSAGING_SENDER_ID: ${VITE_FIREBASE_MESSAGING_SENDER_ID}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID}
+        VITE_FIREBASE_MEASUREMENT_ID: ${VITE_FIREBASE_MEASUREMENT_ID}
+        VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY}
+        VITE_MAPS_WRAPPER_URL: ${VITE_MAPS_WRAPPER_URL}
+        VITE_KONG_BASE_URL: ${VITE_KONG_BASE_URL}
+        VITE_KONG_API_KEY: ${VITE_KONG_API_KEY}
+        VITE_TRAIL_QUERY_URL: ${VITE_TRAIL_QUERY_URL}
     ports:
       - "5173:5173"
-    env_file:
-      - ./Frontend/.env
     depends_on:
       kong:
         condition: service_healthy
@@ -122,7 +133,7 @@ services:
       - EVALUATOR_WRAPPER_URL=http://evaluator-wrapper:8006
       - GOOGLEMAPS_URL=http://googlemaps-wrapper:8007
     env_file:
-      - ./Services/.env
+      - ./.env
     depends_on:
       - hiker-profile
       - trail-condition
@@ -148,7 +159,7 @@ services:
     environment:
       - PORT=8001
     env_file:
-      - ./Services/.env
+      - ./.env
     networks:
       - trailguard
 
@@ -163,7 +174,26 @@ services:
     environment:
       - PORT=8002
     env_file:
-      - ./Services/.env
+      - ./.env
+    networks:
+      - trailguard
+
+  trail-query:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Trail_Query_Service
+    expose:
+      - "8011"
+    ports:
+      - "8011:8011"
+    environment:
+      - PORT=8011
+      - TRAIL_CONDITION_URL=http://trail-condition:8002
+      - TRAIL_INCIDENT_URL=http://incident-service:5004
+    env_file:
+      - ./.env
     networks:
       - trailguard
 
@@ -178,7 +208,7 @@ services:
     environment:
       - PORT=8003
     env_file:
-      - ./Services/.env
+      - ./.env
     networks:
       - trailguard
 
@@ -193,7 +223,7 @@ services:
     environment:
       - PORT=8004
     env_file:
-      - ./Services/.env
+      - ./.env
     networks:
       - trailguard
 
@@ -209,7 +239,7 @@ services:
     environment:
       - PORT=8005
     env_file:
-      - ./Services/.env
+      - ./.env
     networks:
       - trailguard
 
@@ -224,7 +254,7 @@ services:
     environment:
       - PORT=8006
     env_file:
-      - ./Services/.env
+      - ./.env
     networks:
       - trailguard
 
@@ -239,7 +269,7 @@ services:
     environment:
       - PORT=8007
     env_file:
-      - ./Services/.env
+      - ./.env
     networks:
       - trailguard
 
@@ -254,7 +284,7 @@ services:
       - PORT=5050
       - PYTHONUNBUFFERED=1
     env_file:
-      - ./Services/.env
+      - ./.env
     volumes:
       - telegram_registry:/app/data
     networks:
@@ -277,7 +307,7 @@ services:
       - NEARBY_USERS_URL=http://nearby-users:5005
       - TRAIL_INCIDENT_URL=http://incident-service:5004
     env_file:
-      - ./Services/.env
+      - ./.env
     depends_on:
       - notification-wrapper
       - googlemaps-wrapper
@@ -300,7 +330,7 @@ services:
     environment:
       - PORT=5004
     env_file:
-      - ./Services/.env
+      - ./.env
     networks:
       - trailguard
     restart: unless-stopped
@@ -317,7 +347,7 @@ services:
     environment:
       - PORT=5003
     env_file:
-      - ./Services/.env
+      - ./.env
     networks:
       - trailguard
     restart: unless-stopped
@@ -334,7 +364,7 @@ services:
     environment:
       - PORT=5005
     env_file:
-      - ./Services/.env
+      - ./.env
     networks:
       - trailguard
     restart: unless-stopped
@@ -351,7 +381,7 @@ services:
     environment:
       - PORT=5006
     env_file:
-      - ./Services/.env
+      - ./.env
     networks:
       - trailguard
     restart: unless-stopped
@@ -372,7 +402,7 @@ services:
       - ALTERNATIVE_ROUTE_URL=http://alternative-route:8009
       - NEARBY_USERS_URL=http://nearby-users:5005
     env_file:
-      - ./Services/.env
+      - ./.env
     depends_on:
       - trail-condition
       - notification-wrapper
@@ -396,7 +426,7 @@ services:
       - GOOGLEMAPS_URL=http://googlemaps-wrapper:8007
       - REPORT_INGESTION_URL=http://report-ingestion:8010
     env_file:
-      - ./Services/.env
+      - ./.env
     depends_on:
       - trail-condition
       - googlemaps-wrapper

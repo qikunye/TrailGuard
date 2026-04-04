@@ -185,6 +185,25 @@ services:
           key_names: [X-API-Key]
           hide_credentials: true
 
+  # ── Trail Query (GraphQL — aggregates trail conditions + incidents) ───────────
+  - name: trail-query
+    url: http://trail-query:8011
+    connect_timeout: 10000
+    read_timeout: 30000
+    write_timeout: 30000
+    routes:
+      - name: trail-query-route
+        paths:
+          - /api/trail-query
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+        preserve_host: false
+    plugins:
+      - name: key-auth
+        config:
+          key_names: [X-API-Key]
+          hide_credentials: true
+
   # ── Incident Risk (Atomic — OutSystems incidents) ─────────────────────────────
   - name: incident-risk
     url: http://incident-risk:8003
