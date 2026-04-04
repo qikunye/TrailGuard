@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="32" fill="#0a0a0a"/>
+
+  <!-- Mountain peaks -->
+  <path d="M8 50 L24 20 L36 38 L44 26 L56 50Z" fill="#1a1a1a" stroke="none"/>
+  <path d="M20 50 L32 18 L44 50Z" fill="#4ade80" opacity="0.15"/>
+  <path d="M32 18 L44 50 L20 50Z" fill="none" stroke="#4ade80" stroke-width="2" stroke-linejoin="round"/>
+
+  <!-- Left mountain outline -->
+  <path d="M8 50 L24 22 L34 38" fill="none" stroke="#4ade80" stroke-width="1.5" stroke-opacity="0.4" stroke-linejoin="round"/>
+
+  <!-- Right smaller peak -->
+  <path d="M34 38 L44 26 L56 50" fill="none" stroke="#4ade80" stroke-width="1.5" stroke-opacity="0.4" stroke-linejoin="round"/>
+
+  <!-- Summit dot -->
+  <circle cx="32" cy="18" r="2.5" fill="#4ade80"/>
+
+  <!-- Base line -->
+  <line x1="8" y1="50" x2="56" y2="50" stroke="#4ade80" stroke-width="1.5" stroke-opacity="0.3"/>
+</svg>
