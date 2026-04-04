@@ -24,7 +24,7 @@ export function useProfile() {
     localStorage.setItem(profileKey, JSON.stringify(data));
   }
 
-  const isSetup = !!(profile.userId && Number(profile.userId) > 0);
+  const isSetup = !!(profile.name?.trim() || (profile.userId && String(profile.userId).trim().length > 0));
 
   return { profile, saveProfile, profileKey, isSetup, uid };
 }

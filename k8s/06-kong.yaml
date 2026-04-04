@@ -1,0 +1,111 @@
+# ─── Kong Deployment ──────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kong
+  template:
+    metadata:
+      labels:
+        app: kong
+    spec:
+      containers:
+        - name: kong
+          image: kong:3.6
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: proxy
+              containerPort: 8000
+            - name: admin
+              containerPort: 8001
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: /kong/kong.yml
+            - name: KONG_PROXY_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_ADMIN_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_PROXY_ERROR_LOG
+              value: /dev/stderr
+            - name: KONG_ADMIN_ERROR_LOG
+              value: /dev/stderr
+            - name: KONG_ADMIN_LISTEN
+              value: "0.0.0.0:8001"
+            - name: KONG_PROXY_LISTEN
+              value: "0.0.0.0:8000"
+            - name: KONG_PROXY_READ_TIMEOUT
+              value: "120000"
+            - name: KONG_PROXY_WRITE_TIMEOUT
+              value: "120000"
+            - name: KONG_PROXY_CONNECT_TIMEOUT
+              value: "10000"
+          volumeMounts:
+            - name: kong-config
+              mountPath: /kong
+              readOnly: true
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 8001
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: kong-config
+          configMap:
+            name: kong-config
+
+# ─── Kong Proxy Service (public — LoadBalancer) ───────────────────────────────
+# This is your single public entry point. The external IP assigned here
+# must be used as VITE_ORCHESTRATOR_URL when building the frontend image.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong
+  namespace: trailguard
+spec:
+  selector:
+    app: kong
+  type: LoadBalancer
+  ports:
+    - name: proxy
+      port: 80
+      targetPort: 8000
+
+# ─── Kong Admin Service (internal only — ClusterIP) ───────────────────────────
+# Never expose port 8001 publicly. Used only by Prometheus scraping inside the cluster.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-admin
+  namespace: trailguard
+spec:
+  selector:
+    app: kong
+  type: ClusterIP
+  ports:
+    - name: admin
+      port: 8001
+      targetPort: 8001

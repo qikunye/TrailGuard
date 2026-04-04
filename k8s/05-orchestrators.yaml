@@ -1,0 +1,262 @@
+# ─── orchestrator ─────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orchestrator
+  template:
+    metadata:
+      labels:
+        app: orchestrator
+    spec:
+      containers:
+        - name: orchestrator
+          image: trailguardt06acr.azurecr.io/orchestrator:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PORT
+              value: "8000"
+            - name: HIKER_PROFILE_URL
+              value: "http://hiker-profile:8001"
+            - name: TRAIL_CONDITION_URL
+              value: "http://trail-condition:8002"
+            - name: INCIDENT_RISK_URL
+              value: "http://incident-risk:8003"
+            - name: HIKE_COMPLETION_URL
+              value: "http://hike-completion:8004"
+            - name: WEATHER_WRAPPER_URL
+              value: "http://weather-wrapper:8005"
+            - name: EVALUATOR_WRAPPER_URL
+              value: "http://evaluator-wrapper:8006"
+            - name: GOOGLEMAPS_URL
+              value: "http://googlemaps-wrapper:8007"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestrator
+  namespace: trailguard
+spec:
+  selector:
+    app: orchestrator
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+
+# ─── incident-reporting ───────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-reporting
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incident-reporting
+  template:
+    metadata:
+      labels:
+        app: incident-reporting
+    spec:
+      containers:
+        - name: incident-reporting
+          image: trailguardt06acr.azurecr.io/incident-reporting:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8008
+          command: ["uvicorn", "Incident_Reporting_Service:app", "--host", "0.0.0.0", "--port", "8008"]
+          env:
+            - name: PORT
+              value: "8008"
+            - name: GOOGLEMAPS_URL
+              value: "http://googlemaps-wrapper:8007"
+            - name: EMERGENCY_CONTACTS_URL
+              value: "http://emergency-contacts:5003"
+            - name: NOTIFICATION_URL
+              value: "http://notification-wrapper:5050"
+            - name: NEARBY_USERS_URL
+              value: "http://nearby-users:5005"
+            - name: TRAIL_INCIDENT_URL
+              value: "http://incident-service:5004"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8008
+            initialDelaySeconds: 15
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incident-reporting
+  namespace: trailguard
+spec:
+  selector:
+    app: incident-reporting
+  ports:
+    - port: 8008
+      targetPort: 8008
+  type: ClusterIP
+
+# ─── report-ingestion ─────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: report-ingestion
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: report-ingestion
+  template:
+    metadata:
+      labels:
+        app: report-ingestion
+    spec:
+      containers:
+        - name: report-ingestion
+          image: trailguardt06acr.azurecr.io/report-ingestion:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8010
+          command: ["uvicorn", "Report_Ingestion_Service:app", "--host", "0.0.0.0", "--port", "8010"]
+          env:
+            - name: PORT
+              value: "8010"
+            - name: TRAIL_CONDITION_URL
+              value: "http://trail-condition:8002"
+            - name: NOTIFICATION_URL
+              value: "http://notification-wrapper:5050"
+            - name: ALTERNATIVE_ROUTE_URL
+              value: "http://alternative-route:8009"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8010
+            initialDelaySeconds: 15
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: report-ingestion
+  namespace: trailguard
+spec:
+  selector:
+    app: report-ingestion
+  ports:
+    - port: 8010
+      targetPort: 8010
+  type: ClusterIP
+
+# ─── alternative-route ────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alternative-route
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alternative-route
+  template:
+    metadata:
+      labels:
+        app: alternative-route
+    spec:
+      containers:
+        - name: alternative-route
+          image: trailguardt06acr.azurecr.io/alternative-route:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8009
+          command: ["uvicorn", "Alternative_Route_Service:app", "--host", "0.0.0.0", "--port", "8009"]
+          env:
+            - name: PORT
+              value: "8009"
+            - name: TRAIL_CONDITION_URL
+              value: "http://trail-condition:8002"
+            - name: GOOGLEMAPS_URL
+              value: "http://googlemaps-wrapper:8007"
+            - name: REPORT_INGESTION_URL
+              value: "http://report-ingestion:8010"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8009
+            initialDelaySeconds: 15
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alternative-route
+  namespace: trailguard
+spec:
+  selector:
+    app: alternative-route
+  ports:
+    - port: 8009
+      targetPort: 8009
+  type: ClusterIP

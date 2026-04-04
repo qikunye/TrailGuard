@@ -1,0 +1,447 @@
+# ─── hiker-profile ────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hiker-profile
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hiker-profile
+  template:
+    metadata:
+      labels:
+        app: hiker-profile
+    spec:
+      containers:
+        - name: hiker-profile
+          image: trailguardt06acr.azurecr.io/hiker-profile:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8001
+          env:
+            - name: PORT
+              value: "8001"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hiker-profile
+  namespace: trailguard
+spec:
+  selector:
+    app: hiker-profile
+  ports:
+    - port: 8001
+      targetPort: 8001
+  type: ClusterIP
+
+# ─── trail-condition ──────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trail-condition
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trail-condition
+  template:
+    metadata:
+      labels:
+        app: trail-condition
+    spec:
+      containers:
+        - name: trail-condition
+          image: trailguardt06acr.azurecr.io/trail-condition:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8002
+          env:
+            - name: PORT
+              value: "8002"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trail-condition
+  namespace: trailguard
+spec:
+  selector:
+    app: trail-condition
+  ports:
+    - port: 8002
+      targetPort: 8002
+  type: ClusterIP
+
+# ─── incident-risk ────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-risk
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incident-risk
+  template:
+    metadata:
+      labels:
+        app: incident-risk
+    spec:
+      containers:
+        - name: incident-risk
+          image: trailguardt06acr.azurecr.io/incident-risk:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8003
+          env:
+            - name: PORT
+              value: "8003"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incident-risk
+  namespace: trailguard
+spec:
+  selector:
+    app: incident-risk
+  ports:
+    - port: 8003
+      targetPort: 8003
+  type: ClusterIP
+
+# ─── hike-completion ──────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hike-completion
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hike-completion
+  template:
+    metadata:
+      labels:
+        app: hike-completion
+    spec:
+      containers:
+        - name: hike-completion
+          image: trailguardt06acr.azurecr.io/hike-completion:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8004
+          env:
+            - name: PORT
+              value: "8004"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8004
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hike-completion
+  namespace: trailguard
+spec:
+  selector:
+    app: hike-completion
+  ports:
+    - port: 8004
+      targetPort: 8004
+  type: ClusterIP
+
+# ─── incident-service ─────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-service
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incident-service
+  template:
+    metadata:
+      labels:
+        app: incident-service
+    spec:
+      containers:
+        - name: incident-service
+          image: trailguardt06acr.azurecr.io/incident-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5004
+          env:
+            - name: PORT
+              value: "5004"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5004
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incident-service
+  namespace: trailguard
+spec:
+  selector:
+    app: incident-service
+  ports:
+    - port: 5004
+      targetPort: 5004
+  type: ClusterIP
+
+# ─── emergency-contacts ───────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: emergency-contacts
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: emergency-contacts
+  template:
+    metadata:
+      labels:
+        app: emergency-contacts
+    spec:
+      containers:
+        - name: emergency-contacts
+          image: trailguardt06acr.azurecr.io/emergency-contacts:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5003
+          env:
+            - name: PORT
+              value: "5003"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5003
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: emergency-contacts
+  namespace: trailguard
+spec:
+  selector:
+    app: emergency-contacts
+  ports:
+    - port: 5003
+      targetPort: 5003
+  type: ClusterIP
+
+# ─── nearby-users ─────────────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nearby-users
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nearby-users
+  template:
+    metadata:
+      labels:
+        app: nearby-users
+    spec:
+      containers:
+        - name: nearby-users
+          image: trailguardt06acr.azurecr.io/nearby-users:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5005
+          env:
+            - name: PORT
+              value: "5005"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nearby-users
+  namespace: trailguard
+spec:
+  selector:
+    app: nearby-users
+  ports:
+    - port: 5005
+      targetPort: 5005
+  type: ClusterIP
+
+# ─── completed-user-hike ──────────────────────────────────────────────────────
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: completed-user-hike
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: completed-user-hike
+  template:
+    metadata:
+      labels:
+        app: completed-user-hike
+    spec:
+      containers:
+        - name: completed-user-hike
+          image: trailguardt06acr.azurecr.io/completed-user-hike:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5006
+          env:
+            - name: PORT
+              value: "5006"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5006
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: completed-user-hike
+  namespace: trailguard
+spec:
+  selector:
+    app: completed-user-hike
+  ports:
+    - port: 5006
+      targetPort: 5006
+  type: ClusterIP
