@@ -35,41 +35,6 @@ services:
       retries: 5
       start_period: 20s
 
-  # ─── Prometheus ─────────────────────────────────────────────
-  # Scrapes Kong metrics from http://kong:8001/metrics every 15s.
-  # Dashboard: http://localhost:9090
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "9090:9090"
-    networks:
-      - trailguard
-    restart: unless-stopped
-    depends_on:
-      kong:
-        condition: service_healthy
-
-  # ─── Grafana ─────────────────────────────────────────────────
-  # Visualise Kong metrics. Dashboard: http://localhost:13000
-  # Default login: admin / admin  (change on first login)
-  # Import Kong official dashboard: ID 7424
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "13000:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - grafana-data:/var/lib/grafana
-    networks:
-      - trailguard
-    restart: unless-stopped
-    depends_on:
-      - prometheus
 
   # ─── Konga — Kong Admin UI ───────────────────────────────────
   # Dashboard for inspecting routes, consumers, plugins, and logs.
@@ -440,5 +405,4 @@ networks:
     driver: bridge
 
 volumes:
-  grafana-data:
   telegram_registry:
