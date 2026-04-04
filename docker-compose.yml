@@ -105,6 +105,8 @@ services:
         VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY}
         VITE_MAPS_WRAPPER_URL: ${VITE_MAPS_WRAPPER_URL}
         VITE_KONG_BASE_URL: ${VITE_KONG_BASE_URL}
+        VITE_KONG_API_KEY: ${VITE_KONG_API_KEY}
+        VITE_TRAIL_QUERY_URL: ${VITE_TRAIL_QUERY_URL}
     ports:
       - "5173:5173"
     depends_on:
@@ -171,6 +173,25 @@ services:
       - "8002"
     environment:
       - PORT=8002
+    env_file:
+      - ./.env
+    networks:
+      - trailguard
+
+  trail-query:
+    build:
+      context: ./Services/atomic
+      dockerfile: Dockerfile
+      args:
+        SERVICE: Trail_Query_Service
+    expose:
+      - "8011"
+    ports:
+      - "8011:8011"
+    environment:
+      - PORT=8011
+      - TRAIL_CONDITION_URL=http://trail-condition:8002
+      - TRAIL_INCIDENT_URL=http://incident-service:5004
     env_file:
       - ./.env
     networks:

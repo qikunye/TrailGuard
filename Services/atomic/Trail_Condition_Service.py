@@ -16,8 +16,10 @@ import os
 import httpx
 import logging
 from datetime import datetime, timezone
+from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 log = logging.getLogger("trail_condition")
 
@@ -42,24 +44,24 @@ TRAIL_DB: dict[str, dict] = {
         "trailId": "1", "name": "Southern Ridges Loop",
         "difficulty": "Easy", "difficultyRating": 2,
         "operationalStatus": "OPEN",
-        # HarbourFront MRT → Hort Park main gate (Alexandra Road)
         "startPoint": "1.2644, 103.8208", "endPoint": "1.2895, 103.8043",
+        "distanceKm": 9.0, "estimatedDurationMins": 162, "recommendedPaceMinsPerKm": 18,
         "activeHazards": 0, "hazardDetails": [], "isClosed": False,
     },
     "2": {
         "trailId": "2", "name": "MacRitchie Reservoir Trail",
         "difficulty": "Moderate", "difficultyRating": 3,
         "operationalStatus": "OPEN",
-        # MacRitchie Reservoir carpark (Island Club Rd) → Venus Drive carpark
         "startPoint": "1.3442, 103.8197", "endPoint": "1.3592, 103.8320",
+        "distanceKm": 11.0, "estimatedDurationMins": 242, "recommendedPaceMinsPerKm": 22,
         "activeHazards": 0, "hazardDetails": [], "isClosed": False,
     },
     "3": {
         "trailId": "3", "name": "Bukit Timah Summit Trail",
         "difficulty": "Hard", "difficultyRating": 4,
         "operationalStatus": "OPEN",
-        # Bukit Timah Nature Reserve main entrance (Hindhede Dr) → Dairy Farm Nature Park entrance
         "startPoint": "1.3511, 103.7761", "endPoint": "1.3468, 103.7738",
+        "distanceKm": 6.0, "estimatedDurationMins": 168, "recommendedPaceMinsPerKm": 28,
         "activeHazards": 1,
         "hazardDetails": [{"type": "slippery_rocks", "severity": "minor", "location": "upper slope"}],
         "isClosed": False,
@@ -68,48 +70,48 @@ TRAIL_DB: dict[str, dict] = {
         "trailId": "4", "name": "Labrador Nature Reserve Trail",
         "difficulty": "Easy", "difficultyRating": 1,
         "operationalStatus": "OPEN",
-        # Labrador Park MRT exit → Berlayer Creek lookout area
         "startPoint": "1.2627, 103.8030", "endPoint": "1.2706, 103.8083",
+        "distanceKm": 4.0, "estimatedDurationMins": 72, "recommendedPaceMinsPerKm": 18,
         "activeHazards": 0, "hazardDetails": [], "isClosed": False,
     },
     "5": {
         "trailId": "5", "name": "Sungei Buloh Wetland Walk",
         "difficulty": "Easy", "difficultyRating": 1,
         "operationalStatus": "OPEN",
-        # Sungei Buloh main entrance (Neo Tiew Crescent) → far observation hide
         "startPoint": "1.4467, 103.7240", "endPoint": "1.4514, 103.7304",
+        "distanceKm": 7.0, "estimatedDurationMins": 126, "recommendedPaceMinsPerKm": 18,
         "activeHazards": 0, "hazardDetails": [], "isClosed": False,
     },
     "6": {
         "trailId": "6", "name": "Bukit Batok Nature Park Loop",
         "difficulty": "Easy", "difficultyRating": 2,
         "operationalStatus": "OPEN",
-        # Bukit Batok NP entrance (Bukit Batok East Ave 2) → Little Guilin viewpoint
         "startPoint": "1.3479, 103.7601", "endPoint": "1.3504, 103.7635",
+        "distanceKm": 5.0, "estimatedDurationMins": 90, "recommendedPaceMinsPerKm": 18,
         "activeHazards": 0, "hazardDetails": [], "isClosed": False,
     },
     "7": {
         "trailId": "7", "name": "Pulau Ubin Chek Jawa Trail",
         "difficulty": "Easy", "difficultyRating": 2,
         "operationalStatus": "OPEN",
-        # Pulau Ubin village (near jetty) → Chek Jawa Wetlands visitor centre
         "startPoint": "1.4044, 103.9592", "endPoint": "1.4002, 103.9671",
+        "distanceKm": 6.0, "estimatedDurationMins": 108, "recommendedPaceMinsPerKm": 18,
         "activeHazards": 0, "hazardDetails": [], "isClosed": False,
     },
     "8": {
         "trailId": "8", "name": "Kent Ridge Park Trail",
         "difficulty": "Moderate", "difficultyRating": 3,
         "operationalStatus": "OPEN",
-        # Kent Ridge Park entrance (Vigilante Drive) → West Coast Road end
         "startPoint": "1.2960, 103.7836", "endPoint": "1.2875, 103.7880",
+        "distanceKm": 5.0, "estimatedDurationMins": 110, "recommendedPaceMinsPerKm": 22,
         "activeHazards": 0, "hazardDetails": [], "isClosed": False,
     },
     "9": {
         "trailId": "9", "name": "Admiralty Park Mangrove Trail",
         "difficulty": "Easy", "difficultyRating": 2,
         "operationalStatus": "CAUTION",
-        # Admiralty Park main entrance (Admiralty Road West) → mangrove boardwalk far end
         "startPoint": "1.4406, 103.7990", "endPoint": "1.4451, 103.8032",
+        "distanceKm": 4.0, "estimatedDurationMins": 72, "recommendedPaceMinsPerKm": 18,
         "activeHazards": 1,
         "hazardDetails": [{"type": "slippery_boardwalk", "severity": "moderate", "location": "mangrove section"}],
         "isClosed": False,
@@ -118,11 +120,27 @@ TRAIL_DB: dict[str, dict] = {
         "trailId": "10", "name": "Clementi Forest Trail",
         "difficulty": "Moderate", "difficultyRating": 3,
         "operationalStatus": "OPEN",
-        # Clementi Ave 6 forest access → West Coast Highway end
         "startPoint": "1.3243, 103.7682", "endPoint": "1.3299, 103.7748",
+        "distanceKm": 7.0, "estimatedDurationMins": 154, "recommendedPaceMinsPerKm": 22,
         "activeHazards": 0, "hazardDetails": [], "isClosed": False,
     },
 }
+
+# ── Trail Hazards store (Trail Hazards DB) ───────────────────────────────────
+# Keyed by hazard_id.  In production this would be a SQL table.
+HAZARD_DB: dict[str, dict] = {}
+
+
+class HazardReport(BaseModel):
+    userId:      str   = Field(...,  example="usr_001")
+    trailId:     str   = Field(...,  example="1")
+    hazardType:  str   = Field(...,  example="landslide")
+    description: str   = Field("",  example="Rockfall blocking main path")
+    severity:    int   = Field(...,  ge=1, le=5)
+    photo:       str | None = None
+    latitude:    float = Field(...,  example=1.3511)
+    longitude:   float = Field(...,  example=103.7761)
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -258,9 +276,11 @@ async def update_trail_condition(trail_id: str, body: dict):
 
     if hazard_type:
         data["hazardDetails"].append({
-            "type":     hazard_type.lower().replace(" ", "_"),
-            "severity": severity_str,
-            "location": body.get("location", "reported location"),
+            "type":        hazard_type.lower().replace(" ", "_"),
+            "severity":    severity_str,
+            "location":    body.get("location", "reported location"),
+            "description": body.get("description", ""),
+            "reported_at": body.get("updatedAt", datetime.now(timezone.utc).isoformat()),
         })
 
     log.info("Trail %s updated → status=%s activeHazards=%d", trail_id, new_status, hazard_count)
@@ -307,6 +327,44 @@ async def get_candidate_trails(body: dict):
         })
 
     return {"candidateTrails": candidates, "count": len(candidates)}
+
+
+@app.post("/CreateReport", tags=["Trail Hazards"])
+async def create_report(body: HazardReport):
+    """
+    Step 6 — Called by Report Ingestion Service to persist a hazard report
+    to the Trail Hazards DB.
+    """
+    hazard_id = f"HAZ-{body.trailId}-{uuid4().hex[:8].upper()}"
+    reported_at = datetime.now(timezone.utc).isoformat()
+
+    record = {
+        "hazard_id":   hazard_id,
+        "trail_id":    body.trailId,
+        "user_id":     body.userId,
+        "hazard_type": body.hazardType,
+        "description": body.description,
+        "severity":    body.severity,
+        "photo":       body.photo or "",
+        "latitude":    body.latitude,
+        "longitude":   body.longitude,
+        "status":      "ACTIVE",
+        "reported_at": reported_at,
+    }
+    HAZARD_DB[hazard_id] = record
+    log.info("Hazard report created | hazardId=%s trailId=%s", hazard_id, body.trailId)
+    return {"hazard_id": hazard_id, "success": True, "reported_at": reported_at}
+
+
+@app.get("/hazards/trail/{trail_id}", tags=["Trail Hazards"])
+async def get_hazards_by_trail(trail_id: str):
+    """Returns all ACTIVE hazards for a trail from the Trail Hazards DB."""
+    hazards = [
+        h for h in HAZARD_DB.values()
+        if str(h["trail_id"]) == str(trail_id) and h["status"] == "ACTIVE"
+    ]
+    hazards.sort(key=lambda h: h["reported_at"], reverse=True)
+    return {"hazards": hazards, "count": len(hazards), "success": True}
 
 
 @app.get("/health", tags=["Ops"])

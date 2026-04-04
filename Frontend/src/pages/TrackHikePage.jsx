@@ -4,216 +4,207 @@ import "leaflet/dist/leaflet.css";
 import Navbar from "../components/shared/Navbar.jsx";
 import { useProfile } from "../hooks/useProfile.js";
 import { kongFetch } from "../lib/kongClient.js";
-import { getAllHazards } from "../services/hazardService.js";
 
-const HIKE_URL             = import.meta.env.VITE_HIKE_URL             ?? "http://localhost:8080/api/completed";
-const INCIDENT_URL         = import.meta.env.VITE_INCIDENT_URL         ?? "http://localhost:8080/api/incident";
-const TRAIL_CONDITION_URL  = import.meta.env.VITE_TRAIL_CONDITION_URL  ?? "http://localhost:8080/api/trail";
+const HIKE_URL          = import.meta.env.VITE_HIKE_URL          ?? "http://localhost:8080/api/completed";
+const TRAIL_QUERY_URL   = import.meta.env.VITE_TRAIL_QUERY_URL   ?? "http://localhost:8080/api/trail-query";
 
 const SEVERITY_LABELS = { 1: "Minor", 2: "Moderate", 3: "Serious", 4: "Critical", 5: "Fatal" };
 const SEVERITY_COLOR  = (s) => s >= 4 ? "text-red bg-red/10 border-red/20" : s >= 3 ? "text-amber bg-amber/10 border-amber/20" : "text-primary bg-primary/10 border-primary/20";
 
-// ── Active trail incidents (last 24 h from Firebase) ─────────────────────────
-function TrailIncidents({ trailId }) {
-  const [incidents, setIncidents] = useState([]);
+// ── GraphQL query — fetches trail conditions + recent incidents in one request ─
+const TRAIL_DASHBOARD_QUERY = `
+  query TrailDashboard($trailId: String!) {
+    trailDashboard(trailId: $trailId) {
+      trailId
+      name
+      operationalStatus
+      difficulty
+      activeHazards
+      hazardDetails { type severity location description reportedAt }
+      distanceKm estimatedDurationMins recommendedPaceMinsPerKm
+      isClosed
+      lastUpdated
+      recentIncidents {
+        incidentId
+        injuryType
+        severity
+        description
+        reportedAt
+        location { lat lng }
+      }
+    }
+  }
+`;
+
+async function fetchTrailDashboard(trailId) {
+  const res = await kongFetch(`${TRAIL_QUERY_URL}/graphql`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: TRAIL_DASHBOARD_QUERY, variables: { trailId: String(trailId) } }),
+  });
+  if (!res.ok) throw new Error(`GraphQL HTTP ${res.status}`);
+  const { data, errors } = await res.json();
+  if (errors?.length) throw new Error(errors[0].message);
+  return data.trailDashboard;
+}
+
+// ── Combined trail status + incidents panel (powered by GraphQL) ──────────────
+function TrailDashboardPanel({ trailId }) {
+  const [dashboard, setDashboard] = useState(null);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState(null);
 
+  // Single GraphQL call fetches trail conditions, reported hazards, and incidents
   useEffect(() => {
     if (!trailId) return;
     setLoading(true);
     setError(null);
-    kongFetch(`${INCIDENT_URL}/incidents/trail/${trailId}/active`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(data => {
-        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-        setIncidents((data.incidents ?? []).filter(
-          inc => inc.reportedAt && new Date(inc.reportedAt).getTime() >= cutoff
-        ));
-      })
-      .catch(err => { console.error("[TrailIncidents]", err); setError(err.message); })
+    fetchTrailDashboard(trailId)
+      .then(setDashboard)
+      .catch(err => { console.error("[TrailDashboard GraphQL]", err); setError(err.message); })
       .finally(() => setLoading(false));
   }, [trailId]);
 
   if (!trailId) return null;
-  if (loading) return (
-    <div className="mt-6 flex items-center gap-2 text-xs text-muted px-1">
-      <div className="w-3 h-3 border border-muted border-t-transparent rounded-full animate-spin" />
-      Loading trail incidents…
-    </div>
-  );
+
+  const opStatus      = dashboard?.operationalStatus ?? "";
+  const hazardDetails = dashboard?.hazardDetails ?? [];
+  const incidents     = dashboard?.recentIncidents ?? [];
+  const hasHazards    = hazardDetails.length > 0;
+
+  const fmtDuration = (mins) => {
+    if (!mins) return "—";
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h > 0 ? `${h}h ${m > 0 ? `${m}m` : ""}`.trim() : `${m}m`;
+  };
+
+  const COND_SEV_COLOR = (s = "") => {
+    const v = s.toLowerCase();
+    if (v === "critical" || v === "severe" || v === "5" || v === "4") return "text-red bg-red/10 border-red/20";
+    if (v === "moderate" || v === "3") return "text-amber bg-amber/10 border-amber/20";
+    return "text-primary bg-primary/10 border-primary/20";
+  };
 
   return (
-    <div className="mt-6">
-      <p className="text-xs text-muted uppercase tracking-widest mb-3">Active Hike Incidents on This Trail</p>
-      {error ? (
-        <p className="text-xs text-muted px-1">Could not load — {error}</p>
-      ) : incidents.length === 0 ? (
-        <p className="text-xs text-muted px-1">No incidents reported in the last 24 hours.</p>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {incidents.map((inc) => (
-            <div key={inc.incidentId ?? inc.id} className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <p className="text-sm font-semibold text-fg">{inc.injuryType}</p>
-                    {inc.severity && (
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_COLOR(inc.severity)}`}>
-                        {SEVERITY_LABELS[inc.severity] ?? `Severity ${inc.severity}`}
-                      </span>
-                    )}
-                  </div>
-                  {inc.description && <p className="text-xs text-muted truncate mb-1">{inc.description}</p>}
-                  <p className="text-xs text-muted font-mono">
-                    {inc.reportedAt ? new Date(inc.reportedAt).toLocaleString("en-SG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                  </p>
-                </div>
-                <span className="w-2.5 h-2.5 rounded-full bg-red block shrink-0 mt-0.5" title="Incident" />
+    <>
+      {/* ── Trail Info ─────────────────────────────────────────── */}
+      {dashboard && (
+        <div className="mt-6">
+          <p className="text-xs text-muted uppercase tracking-widest mb-3">Trail Info</p>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              {
+                label: "Distance",
+                value: dashboard.distanceKm != null ? `${dashboard.distanceKm} km` : "—",
+                icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg>,
+              },
+              {
+                label: "Est. Time",
+                value: fmtDuration(dashboard.estimatedDurationMins),
+                icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>,
+              },
+              {
+                label: "Rec. Pace",
+                value: dashboard.recommendedPaceMinsPerKm != null ? `${dashboard.recommendedPaceMinsPerKm} min/km` : "—",
+                icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
+              },
+            ].map((s) => (
+              <div key={s.label} className="bg-white/[0.03] border border-white/5 rounded-2xl px-3 py-3">
+                <div className="flex items-center gap-1.5 text-muted mb-1">{s.icon}<span className="text-[9px] uppercase tracking-widest">{s.label}</span></div>
+                <p className="text-sm font-bold font-mono text-fg">{s.value}</p>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
-    </div>
-  );
-}
 
-// Severity label/colour for the string severities the condition API returns
-const COND_SEV_COLOR = (s = "") => {
-  const v = s.toLowerCase();
-  if (v === "critical" || v === "severe") return "text-red bg-red/10 border-red/20";
-  if (v === "moderate")                   return "text-amber bg-amber/10 border-amber/20";
-  return "text-primary bg-primary/10 border-primary/20";
-};
-
-// ── Active trail hazards (from Trail Condition Service + user-reported) ────────
-function TrailHazards({ trailId, uid }) {
-  const [condition,       setCondition]       = useState(null);
-  const [condLoading,     setCondLoading]     = useState(false);
-  const [reportedHazards, setReportedHazards] = useState([]);
-
-  // Fetch all hazard reports from the backend (all users) for this trail
-  useEffect(() => {
-    if (!trailId) { setReportedHazards([]); return; }
-    let cancelled = false;
-    const fetchHazards = () => {
-      getAllHazards()
-        .then(data => {
-          if (cancelled) return;
-          const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-          const filtered = (data.hazards ?? []).filter(
-            h => String(h.trailId) === String(trailId)
-              && h.reportedAt && new Date(h.reportedAt).getTime() >= cutoff
-              && h.status === "ACTIVE"
-          );
-          setReportedHazards(filtered);
-        })
-        .catch(() => { if (!cancelled) setReportedHazards([]); });
-    };
-    fetchHazards();
-    // Re-fetch when the page regains focus (user returns after reporting a hazard)
-    window.addEventListener("focus", fetchHazards);
-    return () => { cancelled = true; window.removeEventListener("focus", fetchHazards); };
-  }, [trailId]);
-
-  // Fetch static trail condition data (trails 3 & 9 have known hazards)
-  useEffect(() => {
-    if (!trailId) return;
-    setCondLoading(true);
-    kongFetch(`${TRAIL_CONDITION_URL}/Condition/${trailId}`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(data => setCondition(data))
-      .catch(() => {})
-      .finally(() => setCondLoading(false));
-  }, [trailId]);
-
-  if (!trailId) return null;
-
-  const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
-  const condWithin24h = condition?.lastUpdated
-    ? new Date(condition.lastUpdated).getTime() >= cutoff24h
-    : false;
-
-  const activeCount = condWithin24h ? (condition?.activeHazardCounts ?? 0) : 0;
-  const highestSev  = condition?.highestSeverity ?? "none";
-  const hazardTypes = condition?.hazardTypes ?? [];
-  const opStatus    = condition?.operationalStatus ?? "";
-
-  const hasAny = reportedHazards.length > 0 || activeCount > 0;
-
-  return (
-    <div className="mt-6">
-      <div className="flex items-center gap-2 mb-3">
-        <p className="text-xs text-muted uppercase tracking-widest">Active Hazards on This Trail</p>
-        {condLoading && <div className="w-2.5 h-2.5 border border-muted border-t-transparent rounded-full animate-spin" />}
-      </div>
-      {!hasAny && !condLoading ? (
-        <div className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5 flex items-center gap-3">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
-          <p className="text-sm text-muted">No active hazards on this trail.</p>
+      {/* ── Active Hazards ─────────────────────────────────────── */}
+      <div className="mt-6">
+        <div className="flex items-center gap-2 mb-3">
+          <p className="text-xs text-muted uppercase tracking-widest">Active Hazards on This Trail</p>
+          {loading && <div className="w-2.5 h-2.5 border border-muted border-t-transparent rounded-full animate-spin" />}
         </div>
-      ) : hasAny ? (
-        <div className="flex flex-col gap-2">
-          {/* Static trail condition hazards */}
-          {activeCount > 0 && (
-            <div className="bg-white/[0.03] border border-amber/20 rounded-2xl px-4 py-3.5">
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-semibold text-fg">{activeCount} trail condition hazard{activeCount !== 1 ? "s" : ""}</span>
-                  {highestSev !== "none" && (
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${COND_SEV_COLOR(highestSev)}`}>
-                      Highest: {highestSev}
-                    </span>
-                  )}
-                  {opStatus && opStatus !== "open" && (
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border text-amber bg-amber/10 border-amber/20 uppercase">
-                      {opStatus}
-                    </span>
-                  )}
-                </div>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
-                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-              </div>
-              {hazardTypes.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {hazardTypes.map((t, i) => (
-                    <span key={i} className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-muted capitalize">
-                      {t.replace(/_/g, " ")}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* User-reported hazards (from all users via backend) */}
-          {reportedHazards.map((h) => (
-            <div key={h.hazardId ?? h.id} className="bg-white/[0.03] border border-amber/20 rounded-2xl px-4 py-3.5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <p className="text-sm font-semibold text-fg">{h.hazardType}</p>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_COLOR(h.severity)}`}>
-                      {SEVERITY_LABELS[h.severity] ?? `Severity ${h.severity}`}
-                    </span>
+        {!hasHazards && !loading ? (
+          <div className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5 flex items-center gap-3">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
+            <p className="text-sm text-muted">No active hazards on this trail.</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {hazardDetails.map((h, i) => (
+              <div key={i} className="bg-white/[0.03] border border-amber/20 rounded-2xl px-4 py-3.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <p className="text-sm font-semibold text-fg capitalize">{h.type.replace(/_/g, " ")}</p>
+                      {h.severity && (
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${COND_SEV_COLOR(h.severity)}`}>
+                          {h.severity}
+                        </span>
+                      )}
+                      {opStatus && opStatus !== "OPEN" && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border text-amber bg-amber/10 border-amber/20 uppercase">
+                          {opStatus}
+                        </span>
+                      )}
+                    </div>
+                    {h.description && <p className="text-xs text-muted truncate mb-0.5">{h.description}</p>}
+                    {h.location && <p className="text-xs text-muted/60 truncate mb-0.5">📍 {h.location}</p>}
+                    {h.reportedAt && (
+                      <p className="text-xs text-muted font-mono">
+                        {new Date(h.reportedAt).toLocaleString("en-SG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    )}
                   </div>
-                  {h.description && <p className="text-xs text-muted truncate mb-1">{h.description}</p>}
-                  {h.locationDescription && (
-                    <p className="text-xs text-muted/70 truncate mb-1">{h.locationDescription}</p>
-                  )}
-                  <p className="text-xs text-muted font-mono">
-                    {h.reportedAt ? new Date(h.reportedAt).toLocaleString("en-SG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                  </p>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                  </svg>
                 </div>
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 block shrink-0 mt-0.5" title="Reported hazard" />
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Recent Incidents (GraphQL) ──────────────────────────── */}
+      <div className="mt-6">
+        <div className="flex items-center gap-2 mb-3">
+          <p className="text-xs text-muted uppercase tracking-widest">Active Hike Incidents on This Trail</p>
         </div>
-      ) : null}
-    </div>
+        {error ? (
+          <p className="text-xs text-muted px-1">Could not load — {error}</p>
+        ) : loading ? (
+          <p className="text-xs text-muted px-1">Loading…</p>
+        ) : incidents.length === 0 ? (
+          <p className="text-xs text-muted px-1">No incidents reported in the last 24 hours.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {incidents.map((inc) => (
+              <div key={inc.incidentId} className="bg-white/[0.03] border border-white/5 rounded-2xl px-4 py-3.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <p className="text-sm font-semibold text-fg">{inc.injuryType}</p>
+                      {inc.severity && (
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_COLOR(inc.severity)}`}>
+                          {SEVERITY_LABELS[inc.severity] ?? `Severity ${inc.severity}`}
+                        </span>
+                      )}
+                    </div>
+                    {inc.description && <p className="text-xs text-muted truncate mb-1">{inc.description}</p>}
+                    <p className="text-xs text-muted font-mono">
+                      {inc.reportedAt ? new Date(inc.reportedAt).toLocaleString("en-SG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                    </p>
+                  </div>
+                  <span className="w-2.5 h-2.5 rounded-full bg-red block shrink-0 mt-0.5" title="Incident" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -956,8 +947,7 @@ export default function TrackHikePage() {
         {/* ── ACTIVE TRAIL INCIDENTS & HAZARDS (shown while tracking) ── */}
         {status === "tracking" && selectedHike?.selectedTrailId && (
           <>
-            <TrailIncidents trailId={selectedHike.selectedTrailId} />
-            <TrailHazards   trailId={selectedHike.selectedTrailId} uid={uid} />
+            <TrailDashboardPanel trailId={selectedHike.selectedTrailId} />
           </>
         )}
 
