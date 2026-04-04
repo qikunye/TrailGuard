@@ -1,17 +1,18 @@
 # TrailGuard
 
-A trail safety and hiking management platform for Singapore's hiking community. TrailGuard helps hikers assess trail conditions before heading out, track hikes in real time, respond to on-trail emergencies, and report hazards — all backed by a microservices architecture.
+A trail safety and hiking management platform built for Singapore's hiking community. TrailGuard helps hikers assess trail safety before heading out, track hikes in real time, respond to on-trail emergencies, and report hazards — backed by a microservices architecture.
 
 ---
 
 ## Features
 
-- **AI Trail Safety Assessment** — Pre-hike GO / CAUTION / DO NOT GO verdict powered by GPT-4o-mini, using live weather, trail conditions, and historical incidents
-- **Live Hike Tracking** — GPS breadcrumb trail with planned route overlay on an interactive map
-- **Emergency Response** — One-tap emergency reporting that notifies emergency contacts and nearby hikers via Telegram
-- **Hazard Reporting** — Report trail hazards, auto-update trail status, and receive alternative route suggestions
-- **Telegram Notifications** — Deep-link bot registration; real-time push alerts for hazards and emergencies
-- **Monitoring** — Kong API gateway with rate limiting, Prometheus metrics, and Grafana dashboards
+- **AI Trail Safety Assessment** — Pre-hike GO / CAUTION / DO NOT GO verdict powered by GPT-4o-mini, combining live weather, trail conditions, hiker fitness, and historical incident data
+- **Live Hike Tracking** — Real-time GPS breadcrumb trail with planned route overlay, elapsed time, distance, and pace stats
+- **Emergency Response** — One-tap emergency reporting that notifies emergency contacts and nearby hikers via Telegram; incident persisted to Firestore for trail-wide visibility
+- **Hazard Reporting & Rerouting** — Report trail hazards to update trail status and receive an OSRM-computed alternative route
+- **Trail Dashboard (GraphQL)** — Single GraphQL query aggregates trail conditions, active hazards (with description, location, date), and recent incidents in one round trip
+- **Telegram Notifications** — Deep-link bot registration; real-time Telegram push alerts for hazards and emergencies
+- **Monitoring** — Kong API gateway with per-route key auth, rate limiting, and Konga admin UI
 
 ---
 
@@ -20,50 +21,53 @@ A trail safety and hiking management platform for Singapore's hiking community. 
 | Layer | Technology |
 |---|---|
 | Frontend | React 19, React Router, Tailwind CSS 4, Vite 5, Leaflet |
-| Backend | Python 3, FastAPI, Flask |
+| Backend | Python 3.11, FastAPI |
+| API types | REST (primary) + GraphQL via Strawberry (trail dashboard) |
 | Auth & DB | Firebase Auth, Firebase Firestore |
 | External data | OutSystems (hiker profiles, trail data, hike progress) |
 | AI | OpenAI GPT-4o-mini |
 | Notifications | Telegram Bot API |
-| Maps & routing | Google Maps Platform, OSRM (open-source routing) |
+| Maps & routing | Google Maps Platform, OSRM |
 | Weather | Open-Meteo (free, no key required) |
-| Gateway | Kong 3.6 (DB-less) |
-| Monitoring | Prometheus, Grafana |
+| Gateway | Kong 3.6 (DB-less, key-auth plugin) |
+| Admin UI | Konga |
 | Infrastructure | Docker, Docker Compose |
 
 ---
 
 ## Architecture
 
-All client traffic flows through the Kong API gateway on port `8080`. The frontend talks only to Kong, which routes requests to the appropriate microservice.
+All client traffic flows through the **Kong API Gateway** on port `8080`. The frontend never talks directly to any backend service.
 
 ```
-Frontend (React :5173)
-        │
+Browser (React :5173)
+        │  X-API-Key header on every request
         ▼
 Kong API Gateway (:8080)
+        │  strips key, strips /api/<prefix>, forwards to upstream
         │
-        ├── Orchestrators (composite services)
-        │     ├── Trail Safety Assessment  :8000
-        │     ├── Incident Reporting       :8008
-        │     ├── Report Ingestion         :8010
-        │     └── Alternative Route        :8009
+        ├── Composite / Orchestrator Services
+        │     ├── Trail Safety Assessment   :8000   (Scenario 1)
+        │     ├── Incident Reporting        :8008   (Scenario 2)
+        │     ├── Report Ingestion          :8010   (Scenario 3)
+        │     └── Alternative Route         :8009   (Scenario 3)
         │
         ├── Atomic Services
-        │     ├── Hiker Profile            :8001  → OutSystems
-        │     ├── Trail Condition          :8002  → OutSystems
-        │     ├── Incident Risk            :8003  → OutSystems
-        │     ├── Hike Completion          :8004
-        │     ├── Trail Incident           :5004  → Firestore
-        │     ├── Emergency Contacts       :5003  → OutSystems
-        │     ├── Nearby Users             :5005  → OutSystems
-        │     └── Completed User Hike      :5006  → OutSystems
+        │     ├── Hiker Profile             :8001  → OutSystems
+        │     ├── Trail Condition           :8002  → OutSystems + Trail Hazards DB
+        │     ├── Trail Query (GraphQL)     :8011  → aggregates trail-condition + incidents
+        │     ├── Incident Risk             :8003  → OutSystems
+        │     ├── Hike Completion           :8004
+        │     ├── Trail Incident            :5004  → Firestore
+        │     ├── Emergency Contacts        :5003  → OutSystems
+        │     ├── Nearby Users              :5005  → OutSystems
+        │     └── Completed User Hike       :5006  → OutSystems
         │
         └── Wrappers (external API adapters)
-              ├── Weather                  :8005  → Open-Meteo
-              ├── Evaluator                :8006  → OpenAI
-              ├── Google Maps              :8007  → Google Maps Platform
-              └── Notification             :5050  → Telegram Bot API
+              ├── Weather                   :8005  → Open-Meteo
+              ├── Evaluator                 :8006  → OpenAI GPT-4o-mini
+              ├── Google Maps               :8007  → Google Maps Platform
+              └── Notification              :5050  → Telegram Bot API
 ```
 
 ---
@@ -72,31 +76,73 @@ Kong API Gateway (:8080)
 
 ### Scenario 1 — Pre-Hike Safety Assessment
 
-1. Hiker selects a trail and planned start time
-2. Orchestrator concurrently fetches hiker profile, live weather, trail conditions, and 30/90-day incident counts
-3. Hike completion time is estimated based on fitness, weather, and trail difficulty
-4. Consolidated data is sent to OpenAI — returns **GO / CAUTION / DO NOT GO** with reasoning and confidence score
-5. Hiker sees the verdict before registering the hike
+1. Hiker selects a trail and a planned start time on the **Trail Assessment** page
+2. Orchestrator fires concurrent requests to fetch hiker fitness profile, live weather forecast, trail conditions, and 30/90-day incident counts
+3. Estimated hike completion time is calculated from fitness level, trail difficulty, and weather conditions
+4. All data is sent to OpenAI — returns a **GO / CAUTION / DO NOT GO** verdict with a reasoning paragraph and confidence score
+5. Hiker sees the verdict before proceeding to register the hike
 
 ### Scenario 2 — On-Trail Emergency Response
 
-1. Hiker taps "Report Emergency", selects injury type and severity
-2. GPS coordinates are reverse-geocoded to a human-readable address (Google Maps)
+1. Hiker taps "Report Emergency" on the **Track Hike** page and selects injury type and severity (1–5)
+2. GPS coordinates are reverse-geocoded to a human-readable address via Google Maps
 3. Emergency contacts are fetched from OutSystems
-4. Nearby active hikers on the same trail are fetched from OutSystems
-5. Telegram alerts sent to emergency contacts and nearby hikers in a single notify call
-6. Incident persisted to Firestore for cross-user visibility (visible to all hikers on the same trail within 24 hours)
+4. Nearby active hikers on the same trail are fetched from OutSystems (isHiking = true)
+5. Telegram alerts are sent to emergency contacts and nearby hikers
+6. Incident is persisted to Firestore — visible to all hikers on the same trail via the trail dashboard within 24 hours
 
 ### Scenario 3 — Hazard Reporting & Rerouting
 
-1. Hiker reports a hazard with type, severity (1–5), and GPS location
-2. All currently active hikers on the trail receive a Telegram broadcast
-3. Trail condition status is updated based on severity:
+1. Hiker reports a hazard (type, severity 1–5, GPS location, description) on the **Hazard Report** page
+2. Hazard is persisted to the Trail Hazards DB via Trail Condition Service (`POST /CreateReport`)
+3. All active hikers on the trail receive a Telegram broadcast notification
+4. Trail operational status is updated based on reported severity:
    - Severity 4–5 → **CLOSED**
    - Severity 2–3 → **CAUTION**
    - Severity 1 → unchanged
-4. OSRM is queried for alternative walking routes; the route farthest from the hazard is selected
-5. Frontend displays the original and alternative routes on a map with distance and ETA comparison
+5. OSRM finds candidate alternative walking routes; the route with the greatest deviation from the hazard point is selected
+6. Frontend displays the original and alternative routes on a map with distance and ETA
+
+---
+
+## GraphQL — Trail Dashboard
+
+The Track Hike page uses a **GraphQL** query (via the Trail Query Service) to replace three separate REST calls with a single round trip.
+
+**Endpoint:** `POST /api/trail-query/graphql`
+
+**What it aggregates (3 concurrent fetches via `asyncio.gather`):**
+
+| Source | Data |
+|---|---|
+| `trail-condition:8002/trail/{id}/conditions` | Trail name, status, difficulty, hazard details, distance, estimated duration, recommended pace |
+| `incident-service:5004/incidents/trail/{id}` | Recent incidents from Firestore, filtered to last 24 hours |
+| `trail-condition:8002/hazards/trail/{id}` | Active user-reported hazards from Trail Hazards DB, filtered to last 24 hours |
+
+**Schema (query):**
+```graphql
+query TrailDashboard($trailId: String!) {
+  trailDashboard(trailId: $trailId) {
+    trailId
+    name
+    operationalStatus
+    difficulty
+    activeHazards
+    distanceKm
+    estimatedDurationMins
+    recommendedPaceMinsPerKm
+    hazardDetails { type severity location description reportedAt }
+    isClosed
+    lastUpdated
+    recentIncidents {
+      incidentId injuryType severity description reportedAt
+      location { lat lng }
+    }
+  }
+}
+```
+
+The GraphiQL playground is available at `http://localhost:8011/graphql` (direct, bypasses Kong — no API key needed).
 
 ---
 
@@ -104,24 +150,53 @@ Kong API Gateway (:8080)
 
 ```
 TrailGuard/
-├── .env                        # Master env file — not committed (see .gitignore)
+├── .env                             # Master env file — gitignored (see below)
 ├── docker-compose.yml
 ├── kong/
-│   └── kong.yml                # Kong declarative config (DB-less)
+│   └── kong.yml                     # Kong declarative config (DB-less)
 ├── Frontend/
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── src/
-│       ├── pages/              # React page components
-│       ├── components/         # Shared + feature-specific components
-│       ├── services/           # API call helpers
-│       ├── hooks/              # useAuth, useProfile, etc.
-│       ├── lib/                # kongClient, googleMaps loader
-│       └── firebase/           # Firebase SDK init
+│       ├── pages/                   # One file per page/route
+│       │   ├── LandingPage.jsx
+│       │   ├── LoginPage.jsx
+│       │   ├── DashboardPage.jsx
+│       │   ├── TrailAssessmentPage.jsx
+│       │   ├── AssessmentResultPage.jsx
+│       │   ├── TrailRegistrationPage.jsx
+│       │   ├── TrackHikePage.jsx    # GraphQL trail dashboard + live GPS tracking
+│       │   ├── EmergencyReportPage.jsx
+│       │   ├── EmergencyConfirmPage.jsx
+│       │   ├── HazardReportPage.jsx
+│       │   ├── AlternativeRoutePage.jsx
+│       │   ├── ProfilePage.jsx
+│       │   └── TelegramSetupPage.jsx
+│       ├── components/              # Shared + feature-specific UI components
+│       ├── services/                # API call helpers (kongFetch wrappers)
+│       ├── hooks/                   # useAuth, useProfile
+│       ├── lib/                     # kongClient.js, Google Maps loader
+│       └── firebase/                # Firebase SDK initialisation
 └── Services/
-    ├── orchestrator/           # Composite services (multi-step flows)
-    ├── atomic/                 # Single-responsibility services
-    └── wrappers/               # External API adapters
+    ├── orchestrator/                # Composite services (multi-step flows)
+    │   ├── Trail_Safety_Assessment_Service.py
+    │   ├── Incident_Reporting_Service.py
+    │   ├── Report_Ingestion_Service.py
+    │   └── Alternative_Route_Service.py
+    ├── atomic/                      # Single-responsibility services
+    │   ├── Hiker_Profile_Service.py
+    │   ├── Trail_Condition_Service.py
+    │   ├── Trail_Query_Service.py   # GraphQL (Strawberry)
+    │   ├── Trail_Incident.py        # Firestore incidents
+    │   ├── Incident_Risk_Service.py
+    │   ├── Hike_Completion_Service.py
+    │   ├── Emergency_Contacts_Service.py
+    │   ├── Nearby_Users_Service.py
+    │   └── Completed_User_Hike_Service.py
+    └── wrappers/                    # Thin adapters to external APIs
+        ├── Weather_Wrapper.py
+        ├── Evaluator_Wrapper.py
+        └── GoogleMaps_Wrapper.py
 ```
 
 ---
@@ -131,14 +206,13 @@ TrailGuard/
 ### Prerequisites
 
 - Docker and Docker Compose
-- Node.js 18+ (only needed for local frontend dev without Docker)
 
-### 1. Set up environment variables
+### 1. Create the environment file
 
-Create a `.env` file in the project root:
+Create `.env` in the project root (never committed — listed in `.gitignore`). All backend services and the frontend Docker build read from this single file.
 
 ```env
-# Frontend — baked into Vite build at Docker build time
+# ── Frontend (baked into Vite bundle at Docker build time) ──────────────────
 VITE_FIREBASE_API_KEY=
 VITE_FIREBASE_AUTH_DOMAIN=
 VITE_FIREBASE_PROJECT_ID=
@@ -149,8 +223,10 @@ VITE_FIREBASE_MEASUREMENT_ID=
 VITE_GOOGLE_MAPS_API_KEY=
 VITE_MAPS_WRAPPER_URL=http://localhost:8080/api/maps
 VITE_KONG_BASE_URL=http://localhost:8080
+VITE_KONG_API_KEY=tg-dev-key-local-only
+VITE_TRAIL_QUERY_URL=http://localhost:8080/api/trail-query
 
-# Backend services
+# ── Backend services ─────────────────────────────────────────────────────────
 GOOGLE_MAPS_API_KEY=
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
@@ -163,7 +239,9 @@ OUTSYSTEMS_TRAIL_CONDITION_URL=
 FIREBASE_SERVICE_ACCOUNT_JSON=
 ```
 
-### 2. Run with Docker Compose
+> **Firebase service account:** paste your service account JSON as a single minified line for `FIREBASE_SERVICE_ACCOUNT_JSON`.
+
+### 2. Start everything
 
 ```bash
 docker compose up --build
@@ -174,19 +252,19 @@ docker compose up --build
 | App | http://localhost:5173 |
 | Kong gateway | http://localhost:8080 |
 | Konga (Kong UI) | http://localhost:1337 |
-| Grafana | http://localhost:13000 |
-| Prometheus | http://localhost:9090 |
+| GraphiQL playground | http://localhost:8011/graphql |
 
 ### 3. Local frontend development (optional)
 
-If you want Vite's hot-reload during frontend development, run the backend via Docker and start Vite separately:
+Run the backend stack in Docker and start Vite separately for hot-reload:
 
 ```bash
-# Terminal 1 — backend only
+# Terminal 1 — all backend services
 docker compose up
 
-# Terminal 2 — frontend with hot reload
+# Terminal 2 — Vite dev server with hot reload
 cd Frontend
+cp ../.env .env        # copy root env so Vite picks up VITE_* vars
 npm install
 npm run dev
 ```
@@ -197,23 +275,27 @@ npm run dev
 
 All routes require an `X-API-Key` header. The development key is `tg-dev-key-local-only`.
 
-| Path prefix | Service | Rate limit |
-|---|---|---|
-| `/api/orchestrator` | Trail Safety Assessment | 30 req/min |
-| `/api/incident` | Incident Reporting | — |
-| `/api/hazard-report` | Report Ingestion | — |
-| `/api/alt-route` | Alternative Route | — |
-| `/api/hiker` | Hiker Profile | — |
-| `/api/trail` | Trail Condition | — |
-| `/api/risk` | Incident Risk | — |
-| `/api/completion` | Hike Completion | — |
-| `/api/weather` | Weather Wrapper | — |
-| `/api/evaluator` | Evaluator (OpenAI) | 10 req/min |
-| `/api/maps` | Google Maps Wrapper | — |
-| `/api/notify` | Notification Wrapper | 20 req/min |
-| `/api/emergency` | Emergency Contacts | — |
-| `/api/nearby` | Nearby Users | — |
-| `/api/completed` | Completed User Hike | — |
+| Path prefix | Upstream service | Port | Rate limit |
+|---|---|---|---|
+| `/api/orchestrator` | Trail Safety Assessment | 8000 | 30 req/min |
+| `/api/incident` | Incident Reporting | 8008 | 100 req/min |
+| `/api/hazard-report` | Report Ingestion | 8010 | 100 req/min |
+| `/api/alt-route` | Alternative Route | 8009 | 100 req/min |
+| `/api/trail-query` | Trail Query (GraphQL) | 8011 | 100 req/min |
+| `/api/hiker` | Hiker Profile | 8001 | 100 req/min |
+| `/api/trail` | Trail Condition | 8002 | 100 req/min |
+| `/api/risk` | Incident Risk | 8003 | 100 req/min |
+| `/api/completion` | Hike Completion | 8004 | 100 req/min |
+| `/api/weather` | Weather Wrapper | 8005 | 100 req/min |
+| `/api/evaluator` | Evaluator (OpenAI) | 8006 | 10 req/min |
+| `/api/maps` | Google Maps Wrapper | 8007 | 100 req/min |
+| `/api/notify` | Notification Wrapper | 5050 | 20 req/min |
+| `/api/emergency` | Emergency Contacts | 5003 | 100 req/min |
+| `/api/incidents-svc` | Trail Incident (Firestore) | 5004 | 100 req/min |
+| `/api/nearby` | Nearby Users | 5005 | 100 req/min |
+| `/api/completed` | Completed User Hike | 5006 | 100 req/min |
+
+Kong strips the `/api/<prefix>` before forwarding to the upstream (all routes use `strip_path: true`).
 
 ---
 
@@ -222,14 +304,13 @@ All routes require an `X-API-Key` header. The development key is `tg-dev-key-loc
 1. Open your TrailGuard profile → **Connect Telegram**
 2. This opens a deep link to `@trail_guardbot` with your user ID and phone pre-filled
 3. Tap **Start** in Telegram — the bot auto-registers your account in one tap
-4. You will receive hazard broadcasts and emergency alerts directly in Telegram
+4. You will now receive hazard broadcasts and emergency alerts directly in Telegram
 
-Manual registration is also supported via `/register <userId> +65XXXXXXXX` in the bot chat.
+Manual registration is also supported: send `/register <userId> +65XXXXXXXX` in the bot chat.
 
 ---
 
 ## Monitoring
 
-- **Prometheus** scrapes Kong metrics every 15 seconds at `:9090`
-- **Grafana** at `:13000` (default login: `admin` / `admin`) visualises request rates, latencies, and error rates per route
+- **Konga** at `http://localhost:1337` — visual Kong admin UI for inspecting routes, consumers, plugins, and logs; connect to `http://kong:8001` on first login
 - **Kong access logs** are written to `/tmp/kong-access.log` inside the Kong container
