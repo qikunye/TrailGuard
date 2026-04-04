@@ -45,15 +45,6 @@ plugins:
       path: /tmp/kong-access.log
       reopen: true
 
-  # Prometheus — expose Kong metrics at http://kong:8001/metrics for scraping
-  - name: prometheus
-    config:
-      status_code_metrics: true
-      latency_metrics: true
-      bandwidth_metrics: true
-      upstream_health_metrics: true
-      per_consumer: true
-
   # CORS — allow the TrailGuard frontend (and any local dev origin) through
   - name: cors
     config:
