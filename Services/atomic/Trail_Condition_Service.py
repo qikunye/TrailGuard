@@ -236,6 +236,43 @@ async def get_trail(trail_id: str):
     }
 
 
+@app.post("/trail/{trail_id}/update-condition", tags=["Trail"])
+async def update_trail_condition(trail_id: str, body: dict):
+    """
+    Step 15 — Called by Report Ingestion Service after a hazard is reported.
+    Updates operationalStatus, activeHazards, and hazardDetails in TRAIL_DB.
+    Body: {operationalStatus, highestSeverityActive, hazardCountActive, hazardType, location?, updatedAt?}
+    """
+    data = TRAIL_DB.get(trail_id)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"Trail '{trail_id}' not found.")
+
+    new_status   = body.get("operationalStatus", data["operationalStatus"]).upper()
+    hazard_count = body.get("hazardCountActive", data["activeHazards"] + 1)
+    severity_str = body.get("highestSeverityActive", "minor")
+    hazard_type  = body.get("hazardType")
+
+    data["operationalStatus"] = new_status
+    data["activeHazards"]     = hazard_count
+    data["isClosed"]          = new_status == "CLOSED"
+
+    if hazard_type:
+        data["hazardDetails"].append({
+            "type":     hazard_type.lower().replace(" ", "_"),
+            "severity": severity_str,
+            "location": body.get("location", "reported location"),
+        })
+
+    log.info("Trail %s updated → status=%s activeHazards=%d", trail_id, new_status, hazard_count)
+    return {
+        "trailId":           trail_id,
+        "operationalStatus": new_status,
+        "activeHazards":     hazard_count,
+        "updatedAt":         body.get("updatedAt", datetime.now(timezone.utc).isoformat()),
+        "Success": True,
+    }
+
+
 @app.post("/trails/candidates", tags=["Trail"])
 async def get_candidate_trails(body: dict):
     """
