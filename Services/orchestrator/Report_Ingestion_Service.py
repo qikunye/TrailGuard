@@ -19,6 +19,10 @@ Flow:
   Step 3 – Notify active hikers on trail
     POST /broadcast → Notification Wrapper (SMS broadcast to all isHiking=True hikers)
 
+  Step 15 – Update trail condition based on reported severity
+    POST /trail/{trailId}/update-condition → Trail Condition Service
+    severity 4–5 → CLOSED, severity 2–3 → CAUTION, severity 1 → unchanged
+
   Step 4 – Trigger rerouting if status is CAUTION or CLOSED
     POST /alternative-route → Alternative Route Composite Service
     sends:   {trailId, mountainId, hazardLat, hazardLng, currentLat, currentLng}
@@ -220,6 +224,30 @@ async def report_hazard(report: HazardReport):
             log.info("Step 3 ✓ Broadcast sent to %d hikers", len(nearby_user_ids))
         except HTTPException as e:
             log.warning("Step 3 ✗ Broadcast failed (non-fatal): %s", e.detail)
+
+        # ── Step 15: Update trail condition based on reported severity ───────
+        log.info("Step 15 – Updating trail condition for trailId=%s", report.trailId)
+        severity_to_status = {5: "CLOSED", 4: "CLOSED", 3: "CAUTION", 2: "CAUTION"}
+        new_trail_status = severity_to_status.get(report.severity, operational_status)
+        update_condition_payload = {
+            "operationalStatus":    new_trail_status,
+            "highestSeverityActive": str(report.severity),
+            "hazardCountActive":    1,
+            "hazardType":           report.hazardType,
+            "location":             f"{report.hazardLat:.5f}, {report.hazardLng:.5f}",
+            "updatedAt":            datetime.utcnow().isoformat() + "Z",
+        }
+        try:
+            await _post(
+                client,
+                f"{TRAIL_CONDITION_URL}/trail/{report.trailId}/update-condition",
+                update_condition_payload,
+            )
+            operational_status = new_trail_status
+            HAZARD_STORE[hazard_id]["operationalStatus"] = operational_status
+            log.info("Step 15 ✓ Trail condition updated → %s", operational_status)
+        except HTTPException as e:
+            log.warning("Step 15 ✗ Trail condition update failed (non-fatal): %s", e.detail)
 
         # ── Step 4: Always trigger rerouting when a hazard is reported ─────
         # A new hazard report means conditions have changed, regardless of

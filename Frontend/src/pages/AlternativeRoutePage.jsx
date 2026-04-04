@@ -294,7 +294,7 @@ export default function AlternativeRoutePage() {
       } catch { /* ignore */ }
     }
 
-    navigate("/dashboard");
+    navigate("/track-hike");
   }
 
   useEffect(() => {

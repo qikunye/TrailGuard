@@ -123,9 +123,9 @@ export default function ProfilePage() {
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
 
-    // If this was the first save (just got a userId), send to dashboard
+    // If this was the first save (just got a userId), send to Telegram setup
     if (!existingUserId && userId) {
-      setTimeout(() => navigate("/dashboard", { replace: true }), 1200);
+      setTimeout(() => navigate("/setup/telegram", { replace: true }), 1200);
     }
   }
 
@@ -195,8 +195,8 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* ── Telegram Notifications ── */}
-          <div className="bg-card border border-line rounded-2xl p-6 mb-4">
+          {/* ── Telegram Notifications — hidden during initial setup (handled on next page) ── */}
+          {isSetup && <div className="bg-card border border-line rounded-2xl p-6 mb-4">
             <div className="flex items-center gap-2 mb-1">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary shrink-0">
                 <path d="M21.5 2L2 9.3l7.3 2.7 2.7 7.3L21.5 2z"/>
@@ -205,45 +205,33 @@ export default function ProfilePage() {
               <h2 className="text-[0.95rem] font-semibold text-fg">Telegram Notifications</h2>
             </div>
             <p className="text-xs text-muted mb-4">Get real-time trail alerts &amp; emergency updates via Telegram</p>
-            <div className="bg-surface rounded-xl border border-line p-4 flex flex-col gap-3">
-              <div className="flex items-start gap-3">
-                <span className="text-primary font-bold text-sm shrink-0 w-5 text-center">1</span>
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm text-fg">Open Telegram and search for <span className="font-mono font-semibold text-primary">@trail_guardbot</span>, or tap the button below to open it directly:</p>
-                  <a
-                    href="https://t.me/trail_guardbot"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 self-start px-4 py-2 bg-[#229ED9]/10 border border-[#229ED9]/30 text-[#229ED9] rounded-full text-sm font-semibold no-underline hover:bg-[#229ED9]/20 transition-colors"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21.5 2L2 9.3l7.3 2.7 2.7 7.3L21.5 2z"/>
-                      <path d="M9.3 12l4.5 4.5"/>
-                    </svg>
-                    Open @trail_guardbot
-                  </a>
-                </div>
+
+            {profile.userId && form.phone ? (
+              <div className="flex flex-col gap-3">
+                <a
+                  href={`https://t.me/trail_guardbot?start=${profile.userId}_${form.phone.replace("+", "")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2.5 w-full py-3.5 px-4 bg-[#229ED9] text-white rounded-full text-[0.95rem] font-bold no-underline hover:opacity-90 transition-opacity"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21.5 2L2 9.3l7.3 2.7 2.7 7.3L21.5 2z"/>
+                    <path d="M9.3 12l4.5 4.5"/>
+                  </svg>
+                  Connect Telegram
+                </a>
+                <p className="text-[0.75rem] text-muted text-center">
+                  Opens Telegram and automatically links User #{profile.userId} with {form.phone}
+                </p>
               </div>
-              <div className="flex items-start gap-3">
-                <span className="text-primary font-bold text-sm shrink-0 w-5 text-center">2</span>
-                <div className="flex flex-col gap-1.5">
-                  <p className="text-sm text-fg">
-                    Send the command below, replacing <span className="font-mono text-amber-400">YOUR_ID</span> with your User ID (shown in Account above) and <span className="font-mono text-amber-400">+65XXXXXXXX</span> with your phone:
-                  </p>
-                  <div className="font-mono text-sm bg-[#0d1410] border border-line rounded-lg px-3 py-2 text-primary select-all">
-                    /register {profile.userId ? profile.userId : <span className="text-amber-400">YOUR_ID</span>} +65XXXXXXXX
-                  </div>
-                  <p className="text-[0.75rem] text-muted">
-                    Including your User ID is required so nearby-hiker alerts reach you correctly.
-                  </p>
-                </div>
+            ) : (
+              <div className="bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3 text-sm text-amber-400">
+                {!profile.userId
+                  ? "Save your profile first to get your User ID, then return here to connect Telegram."
+                  : "Add your phone number above and save your profile to enable one-tap Telegram setup."}
               </div>
-              <div className="flex items-start gap-3">
-                <span className="text-primary font-bold text-sm shrink-0 w-5 text-center">3</span>
-                <p className="text-sm text-fg">The bot will confirm once linked — you'll receive trail hazard and emergency alerts directly in Telegram</p>
-              </div>
-            </div>
-          </div>
+            )}
+          </div>}
 
           {/* ── Hiker Info ── */}
           <div className="bg-card border border-line rounded-2xl p-6 mb-4">

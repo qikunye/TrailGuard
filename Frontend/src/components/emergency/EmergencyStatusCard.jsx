@@ -50,7 +50,6 @@ export default function EmergencyStatusCard({ result, notifiedContacts = [] }) {
   const severity               = result?.severity               ?? null;
   const emergencyContactsCount = result?.emergencyContactsNotified ?? 0;
   const nearbyHikersCount      = result?.nearbyHikersNotified   ?? 0;
-  const smsDelivered           = result?.smsDelivered           ?? false;
   const timeCreated            = result?.timeCreated
     ? new Date(result.timeCreated).toLocaleTimeString()
     : "—";
@@ -70,13 +69,6 @@ export default function EmergencyStatusCard({ result, notifiedContacts = [] }) {
         <h1 className="text-xl font-bold text-green mb-1">Help is on the way</h1>
         <p className="text-xs text-muted">Your emergency contacts and nearby hikers have been notified</p>
       </div>
-
-      {/* SMS warning */}
-      {!smsDelivered && (
-        <div className="bg-amber/10 border border-amber/20 rounded-xl px-3.5 py-2.5 mb-4 text-[0.78rem] text-amber text-center leading-snug">
-          ⚠ SMS delivery failed — call your emergency contacts directly.
-        </div>
-      )}
 
       {/* Incident details card */}
       <div className="bg-card border border-line rounded-2xl p-4 mb-3">
