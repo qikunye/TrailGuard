@@ -120,14 +120,6 @@ def _nearby_hiker_sms(req: IncidentRequest, address: str) -> str:
     )
 
 
-def _hiker_confirmation_sms(req: IncidentRequest, contact_count: int, nearby_count: int) -> str:
-    return (
-        f"TrailGuard: Your emergency report has been received. "
-        f"Incident: {req.injuryType} on trail #{req.trailId}, Severity {req.severity}/5. "
-        f"{contact_count} emergency contact(s) and {nearby_count} nearby hiker(s) have been notified. "
-        f"Stay calm, stay put, and help is on the way."
-    )
-
 
 # ── Main Endpoint ─────────────────────────────────────────────────────────────
 
@@ -219,10 +211,12 @@ async def report_incident(req: IncidentRequest):
 
         hiker_display = req.hikerName or f"Hiker {req.userId}"
 
-        # ── Step 4: Notify emergency contacts ─────────────────────────────────
-        log.info("Step 4 – Notifying %d emergency contact(s)", len(emergency_contacts))
+        # ── Steps 4 & 6: Single notify call — emergency contacts + nearby hikers ─
+        log.info("Steps 4 & 6 – Notifying %d contact(s) and %d nearby hiker(s)",
+                 len(emergency_contacts), len(nearby_users))
         contact_delivery = []
-        if emergency_contacts:
+        nearby_delivery  = []
+        if emergency_contacts or nearby_users:
             alert_payload = {
                 "hikerId":           str(req.userId),
                 "hikerName":         hiker_display,
@@ -230,41 +224,19 @@ async def report_incident(req: IncidentRequest):
                 "lat":               req.lat,
                 "lng":               req.lng,
                 "emergencyContacts": emergency_contacts,
-                "nearbyHikers":      [],
+                "nearbyHikers":      nearby_users,
                 "message":           _emergency_contact_sms(req, address),
             }
             try:
-                contact_result = await _post(client, f"{NOTIFICATION_URL}/notify", alert_payload)
-                contact_delivery = contact_result.get("deliveryStatus", [])
+                alert_result    = await _post(client, f"{NOTIFICATION_URL}/notify", alert_payload)
+                tg_status       = alert_result.get("telegramStatus", [])
+                contact_delivery = [r for r in tg_status if r.get("role") == "emergencyContact"]
+                nearby_delivery  = [r for r in tg_status if r.get("role") == "nearbyHiker"]
             except HTTPException:
-                log.warning("Notification Wrapper unavailable – emergency contacts not notified")
-        log.info("Step 4 ✓ contactDelivery=%s", contact_delivery)
+                log.warning("Notification Wrapper unavailable – alerts not sent")
+        log.info("Steps 4 & 6 ✓ contactDelivery=%s nearbyDelivery=%s",
+                 contact_delivery, nearby_delivery)
 
-        # ── Step 6: Notify nearby hikers ──────────────────────────────────────
-        # Pass all nearby users (with userId) so the notification wrapper can reach
-        # those registered with the Telegram bot even if phone is unavailable.
-        log.info("Step 6 – Notifying %d nearby hiker(s)", len(nearby_users))
-        nearby_delivery = []
-        if nearby_users:
-            nearby_payload = {
-                "hikerId":           str(req.userId),
-                "hikerName":         hiker_display,
-                "address":           address,
-                "lat":               req.lat,
-                "lng":               req.lng,
-                "emergencyContacts": [],
-                "nearbyHikers":      nearby_users,
-                "message":           _nearby_hiker_sms(req, address),
-            }
-            try:
-                nearby_result = await _post(client, f"{NOTIFICATION_URL}/notify", nearby_payload)
-                nearby_delivery = nearby_result.get("deliveryStatus", [])
-            except HTTPException:
-                log.warning("Notification Wrapper unavailable – nearby hikers not notified")
-        log.info("Step 6 ✓ nearbyDelivery=%s", nearby_delivery)
-
-        # Count how many nearby hikers were actually reached (SMS or Telegram)
-        nearby_reached = len([d for d in nearby_delivery if d.get("twilioStatus") not in ("failed", None, "skipped") or d.get("telegramStatus") == "sent"])
 
         # ── Step 7: Persist incident in Firestore via Trail Incident Service ───
         log.info("Step 7 – Persisting incident to Trail Incident Service")
@@ -289,31 +261,7 @@ async def report_incident(req: IncidentRequest):
             incident_id = f"INC-{req.userId}-{int(datetime.utcnow().timestamp())}"
         log.info("Step 7 ✓ incidentId=%s", incident_id)
 
-        # ── Step 8: Send confirmation to the hiker ────────────────────────────
-        log.info("Step 8 – Sending confirmation to hiker")
-        try:
-            confirmation_payload = {
-                "hikerId":           str(req.userId),
-                "hikerName":         hiker_display,
-                "address":           address,
-                "lat":               req.lat,
-                "lng":               req.lng,
-                "emergencyContacts": [{"name": "You", "phone": req.hikerPhone}],
-                "nearbyHikers":      [],
-                "message":           _hiker_confirmation_sms(
-                                        req, len(emergency_contacts), nearby_reached
-                                     ),
-            }
-            await _post(client, f"{NOTIFICATION_URL}/notify", confirmation_payload)
-        except HTTPException:
-            log.warning("Notification Wrapper unavailable – hiker confirmation not sent")
-        log.info("Step 8 ✓ confirmation sent to %s", req.hikerPhone)
-
     # ── Build and return response ─────────────────────────────────────────────
-    sms_delivered = any(
-        d.get("twilioStatus") not in ("failed", None)
-        for d in contact_delivery + nearby_delivery
-    )
     response = {
         "status":                "reported",
         "incidentId":            incident_id,
@@ -324,7 +272,6 @@ async def report_incident(req: IncidentRequest):
         "resolvedAddress":       address,
         "emergencyContactsNotified": len(emergency_contacts),
         "nearbyHikersNotified":  len(nearby_users),
-        "smsDelivered":          sms_delivered,
         "contactDeliveryStatus": contact_delivery,
         "nearbyDeliveryStatus":  nearby_delivery,
         "timeCreated":           datetime.utcnow().isoformat() + "Z",

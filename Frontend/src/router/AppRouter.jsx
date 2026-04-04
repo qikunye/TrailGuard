@@ -11,6 +11,7 @@ import EmergencyConfirmPage  from "../pages/EmergencyConfirmPage.jsx";
 import HazardReportPage      from "../pages/HazardReportPage.jsx";
 import AlternativeRoutePage  from "../pages/AlternativeRoutePage.jsx";
 import ProfilePage           from "../pages/ProfilePage.jsx";
+import TelegramSetupPage     from "../pages/TelegramSetupPage.jsx";
 import TrailRegistrationPage from "../pages/TrailRegistrationPage.jsx";
 import TrackHikePage         from "../pages/TrackHikePage.jsx";
 
@@ -32,6 +33,7 @@ export default function AppRouter() {
           <Route path="/hazard"                   element={<HazardReportPage />} />
           <Route path="/hazard/alternative"       element={<AlternativeRoutePage />} />
           <Route path="/profile"                  element={<ProfilePage />} />
+          <Route path="/setup/telegram"           element={<TelegramSetupPage />} />
           <Route path="/register-trail"           element={<TrailRegistrationPage />} />
           <Route path="/track-hike"               element={<TrackHikePage />} />
         </Route>

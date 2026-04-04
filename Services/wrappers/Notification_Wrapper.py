@@ -2,12 +2,13 @@
 TRAILGUARD – Notification Wrapper  (External API Wrapper)
 Port: 5050
 
-Wraps Twilio SMS + Telegram Bot API. Accepts HTTP POST requests from composite
-services and delivers notifications via both channels.
+Wraps the Telegram Bot API. Accepts HTTP POST requests from composite
+services and delivers notifications via Telegram.
 
-Bot commands (users register their phone to receive personal Telegram alerts):
-  /start              – welcome message + registration instructions
-  /register +65XXXXX – link phone number to this Telegram chat
+Bot commands:
+  /start <userId>_<phoneDigits> – auto-registration via deep link (profile page button)
+  /start                        – welcome message with manual instructions
+  /register <userId> +65XXXXX   – manually link phone + userId to this Telegram chat
 
 Scenarios handled:
   POST /notify    – Scenario 2: emergency incident (emergency contacts + nearby hikers)
@@ -23,8 +24,6 @@ import logging
 import threading
 import requests as http_requests
 from flask import Flask, request, jsonify
-from twilio.rest import Client
-from twilio.base.exceptions import TwilioRestException
 from dotenv import load_dotenv
 
 load_dotenv("notification.env")
@@ -32,26 +31,9 @@ load_dotenv("notification.env")
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("NotificationWrapper")
 
-# ── Twilio config ─────────────────────────────────────────────────────────────
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN  = os.environ.get("TWILIO_AUTH_TOKEN")
-TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER")
-TWILIO_OVERRIDE_TO = os.environ.get("TWILIO_OVERRIDE_TO", "")
-
-_missing = [k for k, v in {
-    "TWILIO_ACCOUNT_SID": TWILIO_ACCOUNT_SID,
-    "TWILIO_AUTH_TOKEN":  TWILIO_AUTH_TOKEN,
-    "TWILIO_FROM_NUMBER": TWILIO_FROM_NUMBER,
-}.items() if not v]
-
-if _missing:
-    raise EnvironmentError(f"Missing required environment variables: {', '.join(_missing)}")
-
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
 # ── Telegram config ───────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_ADMIN_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")   # admin/monitor chat
+TELEGRAM_ADMIN_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # Registry persists phone → telegram chat_id mappings across restarts
 REGISTRY_FILE = "/app/data/telegram_registry.json"
@@ -91,10 +73,8 @@ def _normalize_phone(phone: str) -> list[str]:
     """Return possible registry keys for a phone number to handle format mismatches."""
     candidates = [phone]
     digits = phone.lstrip("+")
-    # If missing country code, try with +65 (Singapore)
     if not digits.startswith("65") and len(digits) == 8:
         candidates.append(f"+65{digits}")
-    # If has country code, also try without
     if digits.startswith("65") and len(digits) > 8:
         candidates.append(f"+{digits}")
         candidates.append(f"+{digits[2:]}")
@@ -144,7 +124,6 @@ def tg_send_to_recipient(phone: str, user_id=None, text: str = "") -> bool:
 
 
 def tg_send_to_admin(text: str) -> bool:
-    """Send a summary message to the admin/monitor chat."""
     if not TELEGRAM_ADMIN_CHAT:
         return False
     return _tg_send(TELEGRAM_ADMIN_CHAT, text)
@@ -163,20 +142,32 @@ def _handle_bot_update(update: dict):
         return
 
     if text.startswith("/start"):
+        parts = text.split()
+        # Deep-link auto-registration: /start <userId>_<phoneDigits>
+        if len(parts) == 2 and "_" in parts[1]:
+            uid_part, phone_digits = parts[1].split("_", 1)
+            if uid_part.isdigit() and phone_digits.isdigit():
+                phone = f"+{phone_digits}"
+                if E164_RE.match(phone):
+                    register_phone(phone, chat_id, uid_part)
+                    _tg_send(chat_id, (
+                        f"✅ <b>Connected, {username}!</b>\n\n"
+                        f"Your TrailGuard account (User #{uid_part}) and phone <code>{phone}</code> "
+                        "are now linked.\n\n"
+                        "You'll receive trail hazard and emergency alerts here automatically."
+                    ))
+                    return
+        # Default welcome
         _tg_send(chat_id, (
             f"👋 Hi {username}! I'm the <b>TrailGuard</b> alert bot.\n\n"
-            "To receive emergency and hazard alerts, link your TrailGuard account:\n\n"
-            "<code>/register YOUR_USER_ID +6512345678</code>\n\n"
-            "Find your User ID on your TrailGuard profile page (e.g. <code>/register 46 +6591234567</code>).\n\n"
-            "⚠️ <b>Both your User ID and phone number are required</b> — without the User ID, "
-            "nearby-hiker and hazard broadcast alerts won't reach you."
+            "To connect your account, use the <b>Connect Telegram</b> button on your TrailGuard profile page — "
+            "it links everything automatically in one tap.\n\n"
+            "Or register manually:\n"
+            "<code>/register YOUR_USER_ID +6512345678</code>"
         ))
 
     elif text.startswith("/register"):
         parts = text.split()
-        # Formats accepted:
-        #   /register +6512345678            (phone only)
-        #   /register 46 +6512345678         (userId + phone)
         if len(parts) == 2 and E164_RE.match(parts[1]):
             phone, user_id = parts[1], None
         elif len(parts) == 3 and parts[1].isdigit() and E164_RE.match(parts[2]):
@@ -222,50 +213,6 @@ def _bot_polling_loop():
             time.sleep(5)
 
 
-# ── Twilio SMS helpers ────────────────────────────────────────────────────────
-
-def is_valid_e164(phone: str) -> bool:
-    return bool(E164_RE.match(phone or ""))
-
-
-def send_sms(to: str, body: str) -> str:
-    actual_to = TWILIO_OVERRIDE_TO if TWILIO_OVERRIDE_TO else to
-    msg = twilio_client.messages.create(body=body, from_=TWILIO_FROM_NUMBER, to=actual_to)
-    return msg.status
-
-
-def _send_batch(recipients: list[dict], body: str, recipient_type: str | None = None) -> list[dict]:
-    results = []
-    for r in recipients:
-        phone = r.get("phone", "")
-        entry = {"to": phone}
-        if recipient_type:
-            entry["recipientType"] = recipient_type
-
-        if not TWILIO_OVERRIDE_TO and not is_valid_e164(phone):
-            log.warning("Invalid E.164 number skipped: %s", phone)
-            entry["twilioStatus"] = "failed"
-            results.append(entry)
-            continue
-
-        if not phone:
-            log.warning("Empty phone number skipped")
-            entry["twilioStatus"] = "failed"
-            results.append(entry)
-            continue
-
-        try:
-            entry["twilioStatus"] = send_sms(phone, body)
-            if TWILIO_OVERRIDE_TO:
-                log.info("SMS for %s routed to override number %s", phone, TWILIO_OVERRIDE_TO)
-        except TwilioRestException as e:
-            log.error("Twilio error for %s: %s", phone, e)
-            entry["twilioStatus"] = "failed"
-
-        results.append(entry)
-    return results
-
-
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 # Scenario 2 – Emergency incident
@@ -284,23 +231,28 @@ def notify():
         hiker_id   = data["hikerId"]
         hiker_name = data.get("hikerName") or f"Hiker {hiker_id}"
         address    = data.get("address") or f"{data['lat']}, {data['lng']}"
-        lat        = data["lat"]
-        lng        = data["lng"]
         msg_body   = data["message"]
-
-        # ── SMS (existing behaviour) ──────────────────────────────────────────
-        delivery_status = (
-            _send_batch(data["emergencyContacts"], msg_body, "emergencyContact") +
-            _send_batch(data["nearbyHikers"],      msg_body, "nearbyHiker")
-        )
+        silent     = data.get("silent", False)
 
         tg_results = []
 
-        # ── Telegram: personal message to each emergency contact ──────────────
+        # ── Telegram: hiker self-confirmation (silent calls only) ─────────────
+        hiker_phone = data.get("hikerPhone")
+        hiker_msg   = data.get("hikerMessage")
+        if silent and hiker_phone and hiker_msg:
+            tg_send_to_recipient(hiker_phone, text=(
+                f"✅ <b>Emergency Report Received</b>\n\n"
+                f"{hiker_msg}\n\n"
+                f"📍 <b>Location:</b> {address}\n\n"
+                f"Stay where you are and keep your phone visible."
+            ))
+            return jsonify({"status": "ok", "telegramStatus": []}), 200
+
+        # ── Telegram: emergency contacts ──────────────────────────────────────
         for contact in data["emergencyContacts"]:
-            phone       = contact.get("phone", "")
-            name        = contact.get("name", "there")
-            sent = tg_send_to_recipient(phone, text=(
+            phone = contact.get("phone", "")
+            name  = contact.get("name", "there")
+            sent  = tg_send_to_recipient(phone, text=(
                 f"🚨 <b>TrailGuard Emergency Alert</b>\n\n"
                 f"Hi {name}, you are listed as an emergency contact for <b>{hiker_name}</b>.\n\n"
                 f"<b>Incident:</b> {msg_body}\n\n"
@@ -309,11 +261,11 @@ def notify():
             ))
             tg_results.append({"to": phone, "role": "emergencyContact", "telegramStatus": "sent" if sent else "not_registered"})
 
-        # ── Telegram: personal message to each nearby hiker ──────────────────
+        # ── Telegram: nearby hikers ───────────────────────────────────────────
         for hiker in data["nearbyHikers"]:
             phone   = hiker.get("phone", "")
             user_id = hiker.get("userId")
-            sent = tg_send_to_recipient(phone, user_id, text=(
+            sent    = tg_send_to_recipient(phone, user_id, text=(
                 f"⚠️ <b>TrailGuard Alert — Nearby Hiker Needs Help</b>\n\n"
                 f"<b>{hiker_name}</b> has reported an emergency near your location.\n\n"
                 f"<b>Incident:</b> {msg_body}\n\n"
@@ -324,18 +276,18 @@ def notify():
 
         tg_sent = sum(1 for r in tg_results if r["telegramStatus"] == "sent")
 
-        # ── Telegram: summary to admin chat ──────────────────────────────────
-        tg_send_to_admin(
-            f"🚨 <b>Emergency Alert Dispatched</b>\n\n"
-            f"<b>Hiker:</b> {hiker_name}\n"
-            f"<b>Location:</b> {address}\n"
-            f"<b>Incident:</b> {msg_body}\n\n"
-            f"<b>Emergency contacts notified:</b> {len(data['emergencyContacts'])}\n"
-            f"<b>Nearby hikers notified:</b> {len(data['nearbyHikers'])}\n"
-            f"<b>Reached via Telegram:</b> {tg_sent}"
-        )
+        if not silent:
+            tg_send_to_admin(
+                f"🚨 <b>Emergency Alert Dispatched</b>\n\n"
+                f"<b>Hiker:</b> {hiker_name}\n"
+                f"<b>Location:</b> {address}\n"
+                f"<b>Incident:</b> {msg_body}\n\n"
+                f"<b>Emergency contacts notified:</b> {len(data['emergencyContacts'])}\n"
+                f"<b>Nearby hikers notified:</b> {len(data['nearbyHikers'])}\n"
+                f"<b>Reached via Telegram:</b> {tg_sent}"
+            )
 
-        return jsonify({"status": "ok", "deliveryStatus": delivery_status, "telegramStatus": tg_results}), 200
+        return jsonify({"status": "ok", "telegramStatus": tg_results}), 200
 
     except Exception as e:
         log.exception("Unexpected error in /notify")
@@ -362,12 +314,6 @@ def broadcast():
         severity   = data["severity"]
         user_ids   = data.get("userIds", [])
 
-        sms_body = (
-            f"TRAIL ALERT: {hazard} reported on {trail_name}. "
-            f"Status: {status}. Severity: {severity}/5. "
-            f"Please proceed with caution or exit the trail safely."
-        )
-
         tg_text = (
             f"⚠️ <b>TrailGuard Hazard Alert</b>\n\n"
             f"A hazard has been reported on <b>{trail_name}</b>.\n\n"
@@ -377,11 +323,6 @@ def broadcast():
             f"Please proceed with caution or exit the trail safely."
         )
 
-        # ── SMS ───────────────────────────────────────────────────────────────
-        recipients = [{"phone": p} for p in data["phones"]]
-        delivery_status = _send_batch(recipients, sms_body)
-
-        # ── Telegram: send to nearby hikers by phone or userId ────────────────
         tg_sent = 0
         notified_chats: set[int] = set()
 
@@ -399,18 +340,7 @@ def broadcast():
                     notified_chats.add(chat_id)
                     tg_sent += 1
 
-        # ── Telegram: summary to admin chat ──────────────────────────────────
-        tg_send_to_admin(
-            f"⚠️ <b>Hazard Broadcast Sent</b>\n\n"
-            f"<b>Trail:</b> {trail_name}\n"
-            f"<b>Hazard:</b> {hazard}\n"
-            f"<b>Status:</b> {status}\n"
-            f"<b>Severity:</b> {severity}/5\n"
-            f"<b>Active hikers on trail:</b> {len(user_ids)}\n"
-            f"<b>Reached via Telegram:</b> {tg_sent}"
-        )
-
-        return jsonify({"status": "ok", "deliveryStatus": delivery_status, "telegramSent": tg_sent}), 200
+        return jsonify({"status": "ok", "telegramSent": tg_sent}), 200
 
     except Exception as e:
         log.exception("Unexpected error in /broadcast")
