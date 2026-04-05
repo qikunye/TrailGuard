@@ -15,6 +15,7 @@ export function useHazardReport() {
       return data;
     } catch (err) {
       setError(err.message);
+      return null;
     } finally {
       setLoading(false);
     }
