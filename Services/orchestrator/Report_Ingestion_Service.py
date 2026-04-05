@@ -40,7 +40,9 @@ from datetime import datetime
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -58,6 +60,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    body = await request.body()
+    log.error("422 Validation error | body=%s | errors=%s", body.decode()[:1000], exc.errors())
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 # ── Service URLs ──────────────────────────────────────────────────────────────
 TRAIL_CONDITION_URL    = os.getenv("TRAIL_CONDITION_URL",    "http://localhost:8002")
@@ -220,9 +228,12 @@ async def report_hazard(report: HazardReport):
         except HTTPException:
             log.warning("Step 3 – Nearby Users Service unavailable")
 
-        log.info("Step 3 – Broadcasting hazard alert to %d hikers", len(nearby_user_ids))
+        # Always include the reporter so they receive confirmation, even if they
+        # are not yet in the OutSystems nearby-users list (e.g. just registered).
+        broadcast_ids = list({*nearby_user_ids, report.hikerId})
+        log.info("Step 3 – Broadcasting hazard alert to %d hikers (incl. reporter)", len(broadcast_ids))
         broadcast_payload = {
-            "userIds":           nearby_user_ids,
+            "userIds":           broadcast_ids,
             "phones":            [],   # phones resolved from Telegram registry in notification wrapper
             "trailId":           report.trailId,
             "trailName":         trail_name,

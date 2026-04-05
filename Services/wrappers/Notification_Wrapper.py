@@ -340,6 +340,18 @@ def broadcast():
                     notified_chats.add(chat_id)
                     tg_sent += 1
 
+        # Always send to the admin chat as a fallback so at least one recipient
+        # is guaranteed regardless of who is registered in the Telegram registry.
+        if TELEGRAM_ADMIN_CHAT:
+            try:
+                admin_chat_id = int(TELEGRAM_ADMIN_CHAT)
+                if admin_chat_id not in notified_chats:
+                    if _tg_send(admin_chat_id, tg_text):
+                        notified_chats.add(admin_chat_id)
+                        tg_sent += 1
+            except (ValueError, TypeError):
+                log.warning("TELEGRAM_CHAT_ID is not a valid integer: %s", TELEGRAM_ADMIN_CHAT)
+
         return jsonify({"status": "ok", "telegramSent": tg_sent}), 200
 
     except Exception as e:

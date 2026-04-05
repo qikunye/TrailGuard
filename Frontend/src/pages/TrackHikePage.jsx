@@ -54,8 +54,9 @@ function TrailDashboardPanel({ trailId }) {
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState(null);
 
-  // Single GraphQL call fetches trail conditions, reported hazards, and incidents
-  useEffect(() => {
+  // Fetch trail conditions, reported hazards, and incidents.
+  // Polls every 30 seconds so newly reported hazards appear automatically.
+  const fetchDashboard = useCallback(() => {
     if (!trailId) return;
     setLoading(true);
     setError(null);
@@ -64,6 +65,12 @@ function TrailDashboardPanel({ trailId }) {
       .catch(err => { console.error("[TrailDashboard GraphQL]", err); setError(err.message); })
       .finally(() => setLoading(false));
   }, [trailId]);
+
+  useEffect(() => {
+    fetchDashboard();
+    const interval = setInterval(fetchDashboard, 30000);
+    return () => clearInterval(interval);
+  }, [fetchDashboard]);
 
   if (!trailId) return null;
 

@@ -85,6 +85,7 @@ export default function HazardReportForm({
   onSubmit, loading, hazardType,
   prefillTrailId, prefillTrailName,
   coords, resolvedAddress,
+  uid,
 }) {
   const [description, setDescription] = useState("");
   // "preset:<id>" | "live" | null
@@ -117,8 +118,8 @@ export default function HazardReportForm({
     e.preventDefault();
     if (!selectedLoc) return;
     onSubmit?.({
-      hikerId:     "usr_001",
-      trailId:     prefillTrailId || "unknown",
+      hikerId:     uid || "unknown_user",
+      trailId:     prefillTrailId != null ? String(prefillTrailId) : "unknown",
       mountainId:  "sg",
       hazardType,
       severity:    3,
