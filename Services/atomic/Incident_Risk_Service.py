@@ -3,73 +3,129 @@ TRAILGUARD – Incident Risk Service  (Atomic)
 Port: 8003
 
 Returns recent injury/incident statistics for a given trail.
+All data comes directly from OutSystems IncidentsAPI — no local fallback.
+
+OutSystems endpoint:
+  GET /HikerProfileService/rest/IncidentsAPI/GetRecentIncidents/{trailId}/{recentDays}
+  Response: { "Success": bool, "incidentCount": int, "ErrorCode": int }
 """
 
 import os
+import logging
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="TRAILGUARD – Incident Risk Service", version="1.0.0")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("IncidentRiskService")
+
+app = FastAPI(title="TRAILGUARD – Incident Risk Service", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# ── Mock incident data ───────────────────────────────────────────────────────
-RISK_DB: dict[str, dict] = {
-    "1":  {"trailId": "1",  "incidentsLast30Days": 1, "incidentsLast90Days": 4,
-           "riskScore": 18, "riskTier": "low",    "mostCommonIncidentType": "sprained_ankle"},
-    "2":  {"trailId": "2",  "incidentsLast30Days": 2, "incidentsLast90Days": 6,
-           "riskScore": 28, "riskTier": "low",    "mostCommonIncidentType": "dehydration"},
-    "3":  {"trailId": "3",  "incidentsLast30Days": 4, "incidentsLast90Days": 11,
-           "riskScore": 52, "riskTier": "medium", "mostCommonIncidentType": "slip_and_fall"},
-    "4":  {"trailId": "4",  "incidentsLast30Days": 0, "incidentsLast90Days": 2,
-           "riskScore": 12, "riskTier": "low",    "mostCommonIncidentType": "dehydration"},
-    "5":  {"trailId": "5",  "incidentsLast30Days": 0, "incidentsLast90Days": 1,
-           "riskScore": 10, "riskTier": "low",    "mostCommonIncidentType": "insect_sting"},
-    "6":  {"trailId": "6",  "incidentsLast30Days": 1, "incidentsLast90Days": 3,
-           "riskScore": 15, "riskTier": "low",    "mostCommonIncidentType": "sprained_ankle"},
-    "7":  {"trailId": "7",  "incidentsLast30Days": 0, "incidentsLast90Days": 2,
-           "riskScore": 14, "riskTier": "low",    "mostCommonIncidentType": "dehydration"},
-    "8":  {"trailId": "8",  "incidentsLast30Days": 2, "incidentsLast90Days": 5,
-           "riskScore": 30, "riskTier": "low",    "mostCommonIncidentType": "sprained_ankle"},
-    "9":  {"trailId": "9",  "incidentsLast30Days": 2, "incidentsLast90Days": 6,
-           "riskScore": 35, "riskTier": "medium", "mostCommonIncidentType": "slip_and_fall"},
-    "10": {"trailId": "10", "incidentsLast30Days": 1, "incidentsLast90Days": 4,
-           "riskScore": 22, "riskTier": "low",    "mostCommonIncidentType": "dehydration"},
-}
+OUTSYSTEMS_INCIDENTS_URL = os.getenv(
+    "OUTSYSTEMS_INCIDENTS_URL",
+    "https://personal-eisumi2z.outsystemscloud.com/HikerProfileService/rest/IncidentsAPI",
+)
+
+
+def _risk_tier(count_30: int, count_90: int) -> tuple[int, str]:
+    score = count_30 * 10 + count_90 * 2
+    if score >= 50:
+        tier = "high"
+    elif score >= 25:
+        tier = "medium"
+    else:
+        tier = "low"
+    return score, tier
+
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @app.get("/risk/{trail_id}", tags=["Risk"])
 async def get_incident_risk(trail_id: str):
-    data = RISK_DB.get(trail_id)
-    if not data:
-        raise HTTPException(status_code=404, detail=f"Risk data for trail '{trail_id}' not found.")
-    return data
+    """
+    Returns aggregated risk data for the trail.
+    Fetches 30-day and 90-day incident counts from OutSystems.
+    Returns 503 if OutSystems is unavailable.
+    """
+    count_30: int | None = None
+    count_90: int | None = None
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        # ── Fetch 30-day count ────────────────────────────────────────────────
+        try:
+            r = await client.get(f"{OUTSYSTEMS_INCIDENTS_URL}/GetRecentIncidents/{trail_id}/30")
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("Success"):
+                    count_30 = int(data.get("incidentCount", 0))
+                    log.info("OutSystems IncidentsAPI/30d trailId=%s count=%s", trail_id, count_30)
+                else:
+                    log.warning("OutSystems IncidentsAPI/30d trailId=%s returned Success=False", trail_id)
+            else:
+                log.warning("OutSystems IncidentsAPI/30d trailId=%s status=%s", trail_id, r.status_code)
+        except Exception as exc:
+            log.error("OutSystems IncidentsAPI (30d) unreachable: %s", exc)
+            raise HTTPException(status_code=503, detail="OutSystems IncidentsAPI unreachable")
+
+        # ── Fetch 90-day count ────────────────────────────────────────────────
+        try:
+            r = await client.get(f"{OUTSYSTEMS_INCIDENTS_URL}/GetRecentIncidents/{trail_id}/90")
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("Success"):
+                    count_90 = int(data.get("incidentCount", 0))
+                    log.info("OutSystems IncidentsAPI/90d trailId=%s count=%s", trail_id, count_90)
+                else:
+                    count_90 = 0
+            else:
+                count_90 = 0
+        except Exception as exc:
+            log.warning("OutSystems IncidentsAPI (90d) unreachable: %s", exc)
+            count_90 = 0
+
+    if count_30 is None:
+        raise HTTPException(status_code=503, detail="OutSystems IncidentsAPI unavailable")
+
+    score, tier = _risk_tier(count_30, count_90)
+
+    return {
+        "trailId":             trail_id,
+        "incidentsLast30Days": count_30,
+        "incidentsLast90Days": count_90,
+        "riskScore":           score,
+        "riskTier":            tier,
+        "source":              "outsystems",
+    }
 
 
-# ── Swagger-aligned endpoint: IncidentsAPI / GetRecentIncidents ───────────────
-# Mirrors: GET /HikerProfileService/rest/IncidentsAPI/GetRecentIncidents/{trailId}/{recentDays}
-# Returns only the fields the Swagger contract guarantees.
 @app.get("/GetRecentIncidents/{trail_id}/{recent_days}", tags=["IncidentsAPI"])
 async def get_recent_incidents(trail_id: str, recent_days: int):
-    data = RISK_DB.get(trail_id)
-    if not data:
-        return {"Success": False, "incidentCount": 0, "ErrorCode": 404}
-    # Map recentDays to the closest available historical window.
-    # The Swagger only returns incidentCount — no richer metrics.
-    if recent_days <= 30:
-        count = data["incidentsLast30Days"]
-    else:
-        count = data["incidentsLast90Days"]
-    return {
-        "Success":       True,
-        "incidentCount": count,
-        "ErrorCode":     0,
-    }
+    """
+    Pure proxy to OutSystems IncidentsAPI/GetRecentIncidents.
+    Returns 503 if OutSystems is unavailable.
+    """
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        try:
+            r = await client.get(
+                f"{OUTSYSTEMS_INCIDENTS_URL}/GetRecentIncidents/{trail_id}/{recent_days}"
+            )
+            r.raise_for_status()
+            data = r.json()
+            log.info("OutSystems IncidentsAPI trailId=%s days=%s → %s",
+                     trail_id, recent_days, data.get("incidentCount"))
+            return data
+        except httpx.HTTPStatusError as e:
+            log.error("OutSystems IncidentsAPI HTTP error: %s", e)
+            raise HTTPException(status_code=e.response.status_code, detail="OutSystems error")
+        except Exception as exc:
+            log.error("OutSystems IncidentsAPI unreachable: %s", exc)
+            raise HTTPException(status_code=503, detail="OutSystems IncidentsAPI unreachable")
 
 
 @app.get("/health", tags=["Ops"])
 async def health():
-    return {"status": "ok", "service": "Incident_Risk_Service"}
+    return {"status": "ok", "service": "Incident_Risk_Service", "version": "2.0.0"}
 
 
 if __name__ == "__main__":

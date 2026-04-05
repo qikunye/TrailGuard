@@ -52,8 +52,13 @@ log = logging.getLogger("TrailQueryService")
 # ── Upstream service URLs ─────────────────────────────────────────────────────
 TRAIL_CONDITION_URL = os.getenv("TRAIL_CONDITION_URL", "http://trail-condition:8002")
 TRAIL_INCIDENT_URL  = os.getenv("TRAIL_INCIDENT_URL",  "http://incident-service:5004")
+GOOGLEMAPS_URL      = os.getenv("GOOGLEMAPS_URL",      "http://googlemaps-wrapper:8007")
 
 TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+
+# ── Reverse geocode cache  ────────────────────────────────────────────────────
+# Keyed by "lat,lon" string — avoids repeated API calls for the same coordinates.
+_geocode_cache: dict[str, str] = {}
 
 
 # ── GraphQL types ─────────────────────────────────────────────────────────────
@@ -146,6 +151,31 @@ async def _fetch_reported_hazards(client: httpx.AsyncClient, trail_id: str) -> l
         return []
 
 
+async def _reverse_geocode(client: httpx.AsyncClient, lat: str, lon: str) -> str:
+    """Convert lat/lon strings to a human-readable address via GoogleMaps wrapper."""
+    if not lat or not lon:
+        return "reported location"
+    cache_key = f"{lat},{lon}"
+    if cache_key in _geocode_cache:
+        return _geocode_cache[cache_key]
+    try:
+        r = await client.get(
+            f"{GOOGLEMAPS_URL}/reverse-geocode",
+            params={"lat": lat, "lng": lon},
+            timeout=httpx.Timeout(5.0),
+        )
+        if r.status_code == 200:
+            addr = r.json().get("formattedAddress", "")
+            if addr:
+                _geocode_cache[cache_key] = addr
+                return addr
+    except Exception as e:
+        log.warning("Reverse geocode %s,%s failed: %s", lat, lon, e)
+    fallback = f"{lat}, {lon}"
+    _geocode_cache[cache_key] = fallback
+    return fallback
+
+
 def _within_24h(reported_at: str, cutoff: datetime) -> bool:
     try:
         ts = datetime.fromisoformat(reported_at.replace("Z", "+00:00"))
@@ -186,6 +216,13 @@ class Query:
                 _fetch_reported_hazards(client, trail_id),
             )
 
+            # Geocode all hazard locations concurrently (must be inside the client context)
+            raw_details = condition.get("hazardDetails", [])
+            geocoded_locations = await asyncio.gather(*[
+                _reverse_geocode(client, h.get("lat", ""), h.get("lon", ""))
+                for h in raw_details
+            ])
+
         # Filter incidents to last 24 hours
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         recent = [
@@ -197,11 +234,11 @@ class Query:
             HazardDetail(
                 type=h.get("type", "unknown"),
                 severity=str(h.get("severity", "minor")),
-                location=h.get("location", ""),
+                location=addr,
                 description=h.get("description") or None,
                 reported_at=str(h["reported_at"]) if h.get("reported_at") else None,
             )
-            for h in condition.get("hazardDetails", [])
+            for h, addr in zip(raw_details, geocoded_locations)
         ]
 
         reported_hazards = [

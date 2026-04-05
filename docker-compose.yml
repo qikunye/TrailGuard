@@ -157,6 +157,7 @@ services:
       - PORT=8011
       - TRAIL_CONDITION_URL=http://trail-condition:8002
       - TRAIL_INCIDENT_URL=http://incident-service:5004
+      - GOOGLEMAPS_URL=http://googlemaps-wrapper:8007
     env_file:
       - ./.env
     networks:
@@ -172,6 +173,7 @@ services:
       - "8003"
     environment:
       - PORT=8003
+      - OUTSYSTEMS_INCIDENTS_URL=${OUTSYSTEMS_INCIDENTS_URL:-https://personal-eisumi2z.outsystemscloud.com/HikerProfileService/rest/IncidentsAPI}
     env_file:
       - ./.env
     networks:
