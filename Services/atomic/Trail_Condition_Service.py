@@ -68,6 +68,13 @@ TRAIL_META: dict[str, dict] = {
 # { trail_id: "CAUTION" | "CLOSED" | "OPEN" }
 TRAIL_OVERRIDES: dict[str, str] = {}
 
+# ── Local hazard fallback store ────────────────────────────────────────────────
+# Written by CreateReport immediately before the OutSystems call.
+# Used as fallback when OutSystems Condition read is unavailable.
+# When OutSystems read succeeds, merged with any locally-only hazards
+# (hazardId == 0 means OutSystems AddHazard also failed for that entry).
+LOCAL_HAZARDS: dict[str, list] = {}
+
 # ── Severity int → label ──────────────────────────────────────────────────────
 _SEV_LABEL = {1: "minor", 2: "moderate", 3: "moderate", 4: "severe", 5: "critical"}
 
@@ -115,11 +122,12 @@ async def _os_get_all_trails() -> list | None:
     return None
 
 
-async def _os_get_active_hazards(trail_id: str) -> list:
+async def _os_get_active_hazards(trail_id: str) -> list | None:
     """
     GET TrailConditionAPI/Condition/{trailId}.
-    Returns the activeHazards list (may be empty).
-    Raises HTTPException(503) only if called standalone and OutSystems is down.
+    Returns the activeHazards list on success (may be empty list).
+    Returns None on any network/HTTP error so callers can distinguish
+    'OutSystems returned zero hazards' from 'OutSystems was unreachable'.
     """
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -134,7 +142,29 @@ async def _os_get_active_hazards(trail_id: str) -> list:
             log.warning("OutSystems Condition/%s returned status %s", trail_id, r.status_code)
     except Exception as exc:
         log.warning("OutSystems TrailConditionAPI/Condition/%s: %s", trail_id, exc)
-    return []
+    return None
+
+
+async def _get_hazards(trail_id: str) -> list:
+    """
+    Fetch active hazards from OutSystems, falling back to LOCAL_HAZARDS on failure.
+    When OutSystems succeeds, merges its list with any locally-cached hazards whose
+    AddHazard call previously failed (hazardId == 0), then refreshes LOCAL_HAZARDS.
+    """
+    result = await _os_get_active_hazards(trail_id)
+    if result is None:
+        cached = LOCAL_HAZARDS.get(trail_id, [])
+        log.warning(
+            "OutSystems Condition unavailable for trail %s — returning %d locally cached hazard(s)",
+            trail_id, len(cached),
+        )
+        return cached
+
+    # Merge OS hazards with local-only entries (AddHazard failed → hazardId == 0)
+    local_only = [h for h in LOCAL_HAZARDS.get(trail_id, []) if h.get("hazardId") == 0]
+    merged = result + local_only
+    LOCAL_HAZARDS[trail_id] = merged
+    return merged
 
 
 async def _os_add_hazard(payload: dict) -> dict | None:
@@ -208,7 +238,7 @@ async def get_trail_conditions(trail_id: str):
     """
     trail_data, raw_hazards = await asyncio.gather(
         _os_get_trail(trail_id),
-        _os_get_active_hazards(trail_id),
+        _get_hazards(trail_id),
     )
 
     if trail_data is None and not TRAIL_OVERRIDES.get(trail_id):
@@ -258,7 +288,7 @@ async def get_condition(trail_id: str):
     Returns activeHazards as a list with mapped severity labels.
     operationalStatus comes from TRAIL_OVERRIDES (set by Step 15).
     """
-    raw_hazards = await _os_get_active_hazards(trail_id)
+    raw_hazards = await _get_hazards(trail_id)
     hazard_details = [_hazard_to_detail(h) for h in raw_hazards]
     status = TRAIL_OVERRIDES.get(trail_id, "OPEN")
 
@@ -368,8 +398,8 @@ async def get_candidate_trails(body: dict):
 async def create_report(body: HazardReport):
     """
     Step 6 — Called by Report Ingestion Service to persist a hazard report.
-    Calls OutSystems AddHazard to store in TrailConditionAPI.
-    Returns 503 if OutSystems is unavailable.
+    Always succeeds: writes to OutSystems AddHazard when available, otherwise
+    caches locally in LOCAL_HAZARDS so the hazard is immediately visible.
     """
     # OutSystems expects userId and trailId as long integers.
     # userId may be a Firebase UID (non-numeric) — default to 0 in that case.
@@ -384,6 +414,8 @@ async def create_report(body: HazardReport):
         log.error("CreateReport: trailId '%s' is not numeric — OutSystems requires a long", body.trailId)
         raise HTTPException(status_code=400, detail=f"trailId must be numeric, got '{body.trailId}'")
 
+    now = datetime.now(timezone.utc).isoformat()
+
     payload = {
         "userId":      user_id,
         "trailId":     trail_id,
@@ -395,9 +427,36 @@ async def create_report(body: HazardReport):
         "status":      "ACTIVE",
     }
 
+    # Build local record — hazardId starts at 0 (sentinel for "not yet in OutSystems").
+    # Written to LOCAL_HAZARDS so the hazard is immediately visible even if OutSystems
+    # AddHazard fails.  _get_hazards will merge this into every subsequent read.
+    local_record: dict = {
+        "hazardId":    0,
+        "userId":      str(user_id),
+        "trailId":     str(trail_id),
+        "hazardType":  body.hazardType,
+        "description": body.description,
+        "severity":    body.severity,
+        "lat":         str(body.latitude),
+        "lon":         str(body.longitude),
+        "status":      "ACTIVE",
+        "timeStamp":   now,
+    }
+
     result = await _os_add_hazard(payload)
     if result is None:
-        raise HTTPException(status_code=503, detail="OutSystems AddHazard unavailable")
+        # OutSystems unavailable — cache locally so the hazard is still visible.
+        LOCAL_HAZARDS.setdefault(body.trailId, []).append(local_record)
+        log.warning("OutSystems AddHazard failed — hazard cached locally for trail %s", body.trailId)
+        return {
+            "hazard_id":   f"local-{body.trailId}-{int(datetime.now(timezone.utc).timestamp())}",
+            "success":     True,
+            "reported_at": now,
+        }
+
+    # OutSystems write succeeded — update local record with assigned id, then cache.
+    local_record["hazardId"] = result.get("id", 0)
+    LOCAL_HAZARDS.setdefault(body.trailId, []).append(local_record)
 
     # AddHazard returns { "id": int, "opStatus": "CAUTION"|"OPEN"|..., "Success": true }
     op_status = result.get("opStatus") or result.get("operationalStatus")
@@ -410,7 +469,7 @@ async def create_report(body: HazardReport):
     return {
         "hazard_id":   str(result.get("id", result.get("hazardId", ""))),
         "success":     True,
-        "reported_at": result.get("timeStamp", datetime.now(timezone.utc).isoformat()),
+        "reported_at": result.get("timeStamp", now),
     }
 
 
@@ -420,7 +479,7 @@ async def get_hazards_by_trail(trail_id: str):
     Returns all ACTIVE hazards for a trail, fetched from OutSystems
     TrailConditionAPI/Condition/{trailId}.activeHazards.
     """
-    raw_hazards = await _os_get_active_hazards(trail_id)
+    raw_hazards = await _get_hazards(trail_id)
     active = [h for h in raw_hazards if h.get("status", "ACTIVE") == "ACTIVE"]
     hazards = [_hazard_to_report(h) for h in active]
     return {"hazards": hazards, "count": len(hazards), "success": True}
