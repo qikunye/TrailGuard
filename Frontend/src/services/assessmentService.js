@@ -21,11 +21,12 @@ export async function getTrailAssessment({ userId, trailId, plannedDate, planned
   const res = await kongFetch(`${ORCHESTRATOR_URL}/assess-trail`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId, trailId, plannedDate, plannedStartTime, declaredExpLevel }),
+    body: JSON.stringify({ userId: String(userId), trailId: String(trailId), plannedDate, plannedStartTime, declaredExpLevel }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Assessment failed (HTTP ${res.status})`);
+    const detail = typeof err.detail === "string" ? err.detail : `Assessment failed (HTTP ${res.status})`;
+    throw new Error(detail);
   }
   return res.json();
 }

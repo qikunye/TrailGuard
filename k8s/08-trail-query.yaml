@@ -1,0 +1,61 @@
+# ─── Trail Query Service (GraphQL — aggregates trail conditions + incidents) ───
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trail-query
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trail-query
+  template:
+    metadata:
+      labels:
+        app: trail-query
+    spec:
+      containers:
+        - name: trail-query
+          image: trailguardt06acr.azurecr.io/trail-query:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8011
+          env:
+            - name: PORT
+              value: "8011"
+            - name: TRAIL_CONDITION_URL
+              value: "http://trail-condition:8002"
+            - name: TRAIL_INCIDENT_URL
+              value: "http://incident-service:5004"
+            - name: GOOGLEMAPS_URL
+              value: "http://googlemaps-wrapper:8007"
+          envFrom:
+            - secretRef:
+                name: trailguard-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8011
+            initialDelaySeconds: 10
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trail-query
+  namespace: trailguard
+spec:
+  selector:
+    app: trail-query
+  ports:
+    - port: 8011
+      targetPort: 8011
+  type: ClusterIP

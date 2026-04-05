@@ -59,11 +59,19 @@ push alternative-route  Services         Services/orchestrator/Dockerfile
 
 # ── Frontend (only if --with-frontend flag provided) ─────────────────────────
 if [[ "$WITH_FRONTEND" == true ]]; then
-  echo "--- Building frontend with VITE_ORCHESTRATOR_URL=http://$KONG_IP/api/orchestrator ---"
-  source Frontend/.env  # Load VITE_FIREBASE_* and other vars
-  docker build --platform linux/amd64 -t "$ACR/frontend:latest" \
-    --build-arg VITE_ORCHESTRATOR_URL="http://$KONG_IP/api/orchestrator" \
-    --build-arg VITE_MAPS_WRAPPER_URL="http://$KONG_IP/api/maps" \
+  # sslip.io gives a free HTTPS hostname for any IP — required for GPS/geolocation.
+  KONG_HOST="https://$(echo "$KONG_IP" | tr '.' '-').sslip.io"
+  KONG_API_KEY="tg-frontend-key-change-me-in-production"
+
+  echo "--- Building frontend ---"
+  echo "    Kong host : $KONG_HOST"
+  echo "    Kong key  : $KONG_API_KEY"
+
+  # Load Firebase keys from root .env (never committed)
+  # shellcheck disable=SC1091
+  source .env
+
+  docker buildx build --platform linux/amd64 -t "$ACR/frontend:latest" \
     --build-arg VITE_FIREBASE_API_KEY="$VITE_FIREBASE_API_KEY" \
     --build-arg VITE_FIREBASE_AUTH_DOMAIN="$VITE_FIREBASE_AUTH_DOMAIN" \
     --build-arg VITE_FIREBASE_PROJECT_ID="$VITE_FIREBASE_PROJECT_ID" \
@@ -72,6 +80,16 @@ if [[ "$WITH_FRONTEND" == true ]]; then
     --build-arg VITE_FIREBASE_APP_ID="$VITE_FIREBASE_APP_ID" \
     --build-arg VITE_FIREBASE_MEASUREMENT_ID="$VITE_FIREBASE_MEASUREMENT_ID" \
     --build-arg VITE_GOOGLE_MAPS_API_KEY="$VITE_GOOGLE_MAPS_API_KEY" \
+    --build-arg VITE_KONG_BASE_URL="$KONG_HOST" \
+    --build-arg VITE_KONG_API_KEY="$KONG_API_KEY" \
+    --build-arg VITE_API_BASE_URL="$KONG_HOST" \
+    --build-arg VITE_ORCHESTRATOR_URL="$KONG_HOST/api/orchestrator" \
+    --build-arg VITE_MAPS_WRAPPER_URL="$KONG_HOST/api/maps" \
+    --build-arg VITE_TRAIL_QUERY_URL="$KONG_HOST/api/trail-query" \
+    --build-arg VITE_INCIDENT_URL="$KONG_HOST/api/incident" \
+    --build-arg VITE_HAZARD_REPORT_URL="$KONG_HOST/api/hazard-report" \
+    --build-arg VITE_ALT_ROUTE_URL="$KONG_HOST/api/alt-route" \
+    --build-arg VITE_HIKE_URL="$KONG_HOST/api/completed" \
     Frontend/
   docker push "$ACR/frontend:latest"
   echo ""
@@ -79,8 +97,8 @@ if [[ "$WITH_FRONTEND" == true ]]; then
 else
   echo ""
   echo "Backend images pushed. Next steps:"
-  echo "  1. Deploy backend: bash scripts/03-deploy.sh"
-  echo "  2. Get Kong IP:    kubectl get svc kong -n trailguard"
-  echo "  3. Build frontend: bash scripts/02-build-push.sh --with-frontend <KONG_IP>"
+  echo "  1. Deploy backend:  bash scripts/03-deploy.sh"
+  echo "  2. Get Kong IP:     kubectl get svc kong -n trailguard"
+  echo "  3. Build frontend:  bash scripts/02-build-push.sh --with-frontend <KONG_IP>"
   echo "  4. Deploy frontend: bash scripts/03-deploy.sh --with-frontend"
 fi

@@ -432,3 +432,31 @@ services:
         config:
           key_names: [X-API-Key]
           hide_credentials: true
+
+  # ── Frontend (React SPA — catch-all, no auth required) ───────────────────────
+  - name: frontend
+    url: http://frontend:80
+    connect_timeout: 10000
+    read_timeout: 10000
+    write_timeout: 10000
+    routes:
+      - name: frontend-route
+        paths:
+          - /
+        strip_path: false
+        methods: [GET, HEAD, OPTIONS]
+        preserve_host: false
+
+  # ── ACME HTTP-01 challenge solver (cert-manager) ──────────────────────────────
+  - name: acme-solver
+    url: http://acme-solver.trailguard:8089
+    connect_timeout: 10000
+    read_timeout: 10000
+    write_timeout: 10000
+    routes:
+      - name: acme-challenge-route
+        paths:
+          - /.well-known/acme-challenge
+        strip_path: false
+        methods: [GET]
+        preserve_host: true

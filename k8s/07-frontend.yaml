@@ -22,7 +22,7 @@ spec:
           image: trailguardt06acr.azurecr.io/frontend:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 80
+            - containerPort: 5173
           resources:
             requests:
               cpu: 50m
@@ -33,7 +33,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 5173
             initialDelaySeconds: 5
             periodSeconds: 10
 
@@ -49,5 +49,5 @@ spec:
     app: frontend
   type: ClusterIP
   ports:
-    - port: 80
-      targetPort: 80
+    - port: 5173
+      targetPort: 5173
