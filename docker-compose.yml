@@ -250,10 +250,14 @@ services:
     environment:
       - PORT=5050
       - PYTHONUNBUFFERED=1
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
     env_file:
       - ./.env
     volumes:
       - telegram_registry:/app/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     networks:
       - trailguard
     restart: unless-stopped
@@ -273,6 +277,7 @@ services:
       - NOTIFICATION_URL=http://notification-wrapper:5050
       - NEARBY_USERS_URL=http://nearby-users:5005
       - TRAIL_INCIDENT_URL=http://incident-service:5004
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
     env_file:
       - ./.env
     depends_on:
@@ -281,6 +286,7 @@ services:
       - emergency-contacts
       - nearby-users
       - incident-service
+      - rabbitmq
     networks:
       - trailguard
     restart: unless-stopped
@@ -368,6 +374,7 @@ services:
       - NOTIFICATION_URL=http://notification-wrapper:5050
       - ALTERNATIVE_ROUTE_URL=http://alternative-route:8009
       - NEARBY_USERS_URL=http://nearby-users:5005
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
     env_file:
       - ./.env
     depends_on:
@@ -375,6 +382,7 @@ services:
       - notification-wrapper
       - alternative-route
       - nearby-users
+      - rabbitmq
     networks:
       - trailguard
     restart: unless-stopped
@@ -400,6 +408,27 @@ services:
     networks:
       - trailguard
     restart: unless-stopped
+
+
+  # ─── RabbitMQ Message Broker ─────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    hostname: rabbitmq
+    expose:
+      - "5672"
+    ports:
+      - "15672:15672"   # Management UI — http://localhost:15672 (guest/guest)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - trailguard
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 
 networks:

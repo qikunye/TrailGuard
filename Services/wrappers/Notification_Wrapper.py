@@ -23,6 +23,7 @@ import time
 import logging
 import threading
 import requests as http_requests
+import pika
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
@@ -34,6 +35,10 @@ log = logging.getLogger("NotificationWrapper")
 # ── Telegram config ───────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ADMIN_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
+RABBITMQ_URL        = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+
+HAZARD_QUEUE    = "hazard_notifications"
+INCIDENT_QUEUE  = "incident_notifications"
 
 # Registry persists phone → telegram chat_id mappings across restarts
 REGISTRY_FILE = "/app/data/telegram_registry.json"
@@ -370,9 +375,150 @@ def health():
     }), 200
 
 
+# ── RabbitMQ consumer helpers ─────────────────────────────────────────────────
+
+def _dispatch_hazard(data: dict):
+    """Process a hazard_notifications message (same logic as /broadcast)."""
+    trail_id   = data.get("trailId", "?")
+    trail_name = data.get("trailName") or f"Trail #{trail_id}"
+    hazard     = data.get("hazardType", "Unknown")
+    status     = data.get("operationalStatus", "CAUTION")
+    severity   = data.get("severity", 3)
+    user_ids   = data.get("userIds", [])
+    phones     = data.get("phones", [])
+
+    tg_text = (
+        f"⚠️ <b>TrailGuard Hazard Alert</b>\n\n"
+        f"A hazard has been reported on <b>{trail_name}</b>.\n\n"
+        f"<b>Hazard:</b> {hazard}\n"
+        f"<b>Trail Status:</b> {status}\n"
+        f"<b>Severity:</b> {severity}/5\n\n"
+        f"Please proceed with caution or exit the trail safely."
+    )
+
+    tg_sent = 0
+    notified_chats: set = set()
+
+    for phone in phones:
+        chat_id = chat_id_for_phone(phone)
+        if chat_id and chat_id not in notified_chats:
+            if _tg_send(chat_id, tg_text):
+                notified_chats.add(chat_id)
+                tg_sent += 1
+
+    for uid in user_ids:
+        chat_id = chat_id_for_user_id(uid)
+        if chat_id and chat_id not in notified_chats:
+            if _tg_send(chat_id, tg_text):
+                notified_chats.add(chat_id)
+                tg_sent += 1
+
+    if TELEGRAM_ADMIN_CHAT:
+        try:
+            admin_chat_id = int(TELEGRAM_ADMIN_CHAT)
+            if admin_chat_id not in notified_chats:
+                if _tg_send(admin_chat_id, tg_text):
+                    notified_chats.add(admin_chat_id)
+                    tg_sent += 1
+        except (ValueError, TypeError):
+            pass
+
+    log.info("RabbitMQ hazard dispatch ✓ sent=%d trailId=%s", tg_sent, trail_id)
+
+
+def _dispatch_incident(data: dict):
+    """Process an incident_notifications message (same logic as /notify)."""
+    hiker_id   = data.get("hikerId", "?")
+    hiker_name = data.get("hikerName") or f"Hiker {hiker_id}"
+    address    = data.get("address", "Unknown location")
+    msg_body   = data.get("message", "Emergency reported.")
+    tg_results = []
+
+    for contact in data.get("emergencyContacts", []):
+        phone = contact.get("phone", "")
+        name  = contact.get("name", "there")
+        sent  = tg_send_to_recipient(phone, text=(
+            f"🚨 <b>TrailGuard Emergency Alert</b>\n\n"
+            f"Hi {name}, you are listed as an emergency contact for <b>{hiker_name}</b>.\n\n"
+            f"<b>Incident:</b> {msg_body}\n\n"
+            f"📍 <b>Location:</b> {address}\n\n"
+            f"Please respond immediately or contact emergency services."
+        ))
+        tg_results.append({"to": phone, "role": "emergencyContact", "sent": sent})
+
+    for hiker in data.get("nearbyHikers", []):
+        phone   = hiker.get("phone", "")
+        user_id = hiker.get("userId")
+        sent    = tg_send_to_recipient(phone, user_id, text=(
+            f"⚠️ <b>TrailGuard Alert — Nearby Hiker Needs Help</b>\n\n"
+            f"<b>{hiker_name}</b> has reported an emergency near your location.\n\n"
+            f"<b>Incident:</b> {msg_body}\n\n"
+            f"📍 <b>Location:</b> {address}\n\n"
+            f"If you are nearby, please assist or alert park staff."
+        ))
+        tg_results.append({"to": phone or str(user_id), "role": "nearbyHiker", "sent": sent})
+
+    tg_send_to_admin(
+        f"🚨 <b>Emergency Alert Dispatched</b>\n\n"
+        f"<b>Hiker:</b> {hiker_name}\n"
+        f"<b>Location:</b> {address}\n"
+        f"<b>Incident:</b> {msg_body}\n\n"
+        f"<b>Emergency contacts notified:</b> {len(data.get('emergencyContacts', []))}\n"
+        f"<b>Nearby hikers notified:</b> {len(data.get('nearbyHikers', []))}"
+    )
+
+    tg_sent = sum(1 for r in tg_results if r["sent"])
+    log.info("RabbitMQ incident dispatch ✓ sent=%d hikerId=%s", tg_sent, hiker_id)
+
+
+def _on_message(channel, method, properties, body, queue_name: str):
+    try:
+        data = json.loads(body)
+        log.info("RabbitMQ message received | queue=%s", queue_name)
+        if queue_name == HAZARD_QUEUE:
+            _dispatch_hazard(data)
+        elif queue_name == INCIDENT_QUEUE:
+            _dispatch_incident(data)
+        channel.basic_ack(delivery_tag=method.delivery_tag)
+    except Exception as e:
+        log.error("RabbitMQ message processing error (queue=%s): %s", queue_name, e)
+        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+
+def _rabbitmq_consumer_loop():
+    """Daemon thread: consume from hazard and incident queues with reconnect loop."""
+    while True:
+        try:
+            params = pika.URLParameters(RABBITMQ_URL)
+            params.socket_timeout = 10
+            connection = pika.BlockingConnection(params)
+            channel = connection.channel()
+            channel.basic_qos(prefetch_count=1)
+
+            for queue in (HAZARD_QUEUE, INCIDENT_QUEUE):
+                channel.queue_declare(queue=queue, durable=True)
+                channel.basic_consume(
+                    queue=queue,
+                    on_message_callback=lambda ch, m, p, b, q=queue: _on_message(ch, m, p, b, q),
+                )
+
+            log.info("RabbitMQ consumer started — listening on %s, %s", HAZARD_QUEUE, INCIDENT_QUEUE)
+            channel.start_consuming()
+
+        except pika.exceptions.AMQPConnectionError as e:
+            log.warning("RabbitMQ connection lost: %s — retrying in 10s", e)
+            time.sleep(10)
+        except Exception as e:
+            log.error("RabbitMQ consumer error: %s — retrying in 10s", e)
+            time.sleep(10)
+
+
 # ── Start Telegram bot polling thread ─────────────────────────────────────────
 if TELEGRAM_BOT_TOKEN:
     threading.Thread(target=_bot_polling_loop, daemon=True).start()
+
+# ── Start RabbitMQ consumer thread ────────────────────────────────────────────
+threading.Thread(target=_rabbitmq_consumer_loop, daemon=True).start()
 
 
 if __name__ == "__main__":

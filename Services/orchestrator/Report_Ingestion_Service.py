@@ -35,10 +35,13 @@ Flow:
 """
 
 import os
+import json
 import logging
+import asyncio
 from datetime import datetime
 from uuid import uuid4
 
+import pika
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -72,11 +75,44 @@ TRAIL_CONDITION_URL    = os.getenv("TRAIL_CONDITION_URL",    "http://localhost:8
 NOTIFICATION_URL       = os.getenv("NOTIFICATION_URL",       "http://localhost:5050")
 ALTERNATIVE_ROUTE_URL  = os.getenv("ALTERNATIVE_ROUTE_URL",  "http://localhost:8009")
 NEARBY_USERS_URL       = os.getenv("NEARBY_USERS_URL",       "http://localhost:5005")
+RABBITMQ_URL           = os.getenv("RABBITMQ_URL",           "amqp://guest:guest@localhost:5672/")
 
 TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
 # ── Operational statuses that trigger rerouting ───────────────────────────────
 REROUTE_STATUSES = {"CAUTION", "CLOSED"}
+
+HAZARD_QUEUE = "hazard_notifications"
+
+
+# ── RabbitMQ publish helper ───────────────────────────────────────────────────
+
+def _publish_to_rabbitmq(queue: str, payload: dict) -> bool:
+    """Publish a JSON message to a durable RabbitMQ queue. Returns True on success."""
+    try:
+        params = pika.URLParameters(RABBITMQ_URL)
+        params.socket_timeout = 5
+        connection = pika.BlockingConnection(params)
+        channel = connection.channel()
+        channel.queue_declare(queue=queue, durable=True)
+        channel.basic_publish(
+            exchange="",
+            routing_key=queue,
+            body=json.dumps(payload),
+            properties=pika.BasicProperties(delivery_mode=2),  # persistent
+        )
+        connection.close()
+        log.info("RabbitMQ ✓ published to queue=%s", queue)
+        return True
+    except Exception as e:
+        log.warning("RabbitMQ publish failed (queue=%s): %s", queue, e)
+        return False
+
+
+async def _publish_async(queue: str, payload: dict) -> bool:
+    """Run blocking pika publish in a thread executor to avoid blocking the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _publish_to_rabbitmq, queue, payload)
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -241,11 +277,17 @@ async def report_hazard(report: HazardReport):
             "hazardType":        report.hazardType,
             "severity":          report.severity,
         }
-        try:
-            await _post(client, f"{NOTIFICATION_URL}/broadcast", broadcast_payload)
-            log.info("Step 3 ✓ Broadcast sent to %d hikers", len(nearby_user_ids))
-        except HTTPException as e:
-            log.warning("Step 3 ✗ Broadcast failed (non-fatal): %s", e.detail)
+        # Try RabbitMQ first; fall back to direct HTTP if broker unavailable
+        mq_ok = await _publish_async(HAZARD_QUEUE, broadcast_payload)
+        if mq_ok:
+            log.info("Step 3 ✓ Broadcast queued via RabbitMQ to %d hikers", len(broadcast_ids))
+        else:
+            log.warning("Step 3 – RabbitMQ unavailable, falling back to HTTP /broadcast")
+            try:
+                await _post(client, f"{NOTIFICATION_URL}/broadcast", broadcast_payload)
+                log.info("Step 3 ✓ Broadcast sent via HTTP to %d hikers", len(broadcast_ids))
+            except HTTPException as e:
+                log.warning("Step 3 ✗ Broadcast failed (non-fatal): %s", e.detail)
 
         # ── Step 15: Update trail condition based on reported severity ───────
         log.info("Step 15 – Updating trail condition for trailId=%s", report.trailId)

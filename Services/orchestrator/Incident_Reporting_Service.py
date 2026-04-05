@@ -16,10 +16,12 @@ Full 8-step orchestration (Scenario 2 – User Injured on Trail):
 """
 
 import asyncio
+import json
 import os
 import logging
 from datetime import datetime
 
+import pika
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,8 +48,41 @@ EMERGENCY_CONTACTS_URL = os.getenv("EMERGENCY_CONTACTS_URL", "http://localhost:5
 NOTIFICATION_URL       = os.getenv("NOTIFICATION_URL",       "http://localhost:5050")
 NEARBY_USERS_URL       = os.getenv("NEARBY_USERS_URL",       "http://localhost:5005")
 TRAIL_INCIDENT_URL     = os.getenv("TRAIL_INCIDENT_URL",     "http://localhost:5004")
+RABBITMQ_URL           = os.getenv("RABBITMQ_URL",           "amqp://guest:guest@localhost:5672/")
 
 TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+
+INCIDENT_QUEUE = "incident_notifications"
+
+
+# ── RabbitMQ publish helper ───────────────────────────────────────────────────
+
+def _publish_to_rabbitmq(queue: str, payload: dict) -> bool:
+    """Publish a JSON message to a durable RabbitMQ queue. Returns True on success."""
+    try:
+        params = pika.URLParameters(RABBITMQ_URL)
+        params.socket_timeout = 5
+        connection = pika.BlockingConnection(params)
+        channel = connection.channel()
+        channel.queue_declare(queue=queue, durable=True)
+        channel.basic_publish(
+            exchange="",
+            routing_key=queue,
+            body=json.dumps(payload),
+            properties=pika.BasicProperties(delivery_mode=2),  # persistent
+        )
+        connection.close()
+        log.info("RabbitMQ ✓ published to queue=%s", queue)
+        return True
+    except Exception as e:
+        log.warning("RabbitMQ publish failed (queue=%s): %s", queue, e)
+        return False
+
+
+async def _publish_async(queue: str, payload: dict) -> bool:
+    """Run blocking pika publish in a thread executor."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _publish_to_rabbitmq, queue, payload)
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -227,13 +262,19 @@ async def report_incident(req: IncidentRequest):
                 "nearbyHikers":      nearby_users,
                 "message":           _emergency_contact_sms(req, address),
             }
-            try:
-                alert_result    = await _post(client, f"{NOTIFICATION_URL}/notify", alert_payload)
-                tg_status       = alert_result.get("telegramStatus", [])
-                contact_delivery = [r for r in tg_status if r.get("role") == "emergencyContact"]
-                nearby_delivery  = [r for r in tg_status if r.get("role") == "nearbyHiker"]
-            except HTTPException:
-                log.warning("Notification Wrapper unavailable – alerts not sent")
+            # Try RabbitMQ first; fall back to direct HTTP if broker unavailable
+            mq_ok = await _publish_async(INCIDENT_QUEUE, alert_payload)
+            if mq_ok:
+                log.info("Steps 4 & 6 ✓ Notification queued via RabbitMQ")
+            else:
+                log.warning("Steps 4 & 6 – RabbitMQ unavailable, falling back to HTTP /notify")
+                try:
+                    alert_result     = await _post(client, f"{NOTIFICATION_URL}/notify", alert_payload)
+                    tg_status        = alert_result.get("telegramStatus", [])
+                    contact_delivery = [r for r in tg_status if r.get("role") == "emergencyContact"]
+                    nearby_delivery  = [r for r in tg_status if r.get("role") == "nearbyHiker"]
+                except HTTPException:
+                    log.warning("Steps 4 & 6 ✗ Notification Wrapper unavailable – alerts not sent")
         log.info("Steps 4 & 6 ✓ contactDelivery=%s nearbyDelivery=%s",
                  contact_delivery, nearby_delivery)
 

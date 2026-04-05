@@ -27,6 +27,7 @@ A trail safety and hiking management platform built for Singapore's hiking commu
 | External data | OutSystems (hiker profiles, trail data, hike progress) |
 | AI | OpenAI GPT-4o-mini |
 | Notifications | Telegram Bot API |
+| Message broker | RabbitMQ 3.13 (async notification delivery) |
 | Maps & routing | Google Maps Platform, OSRM |
 | Weather | Open-Meteo (free, no key required) |
 | Gateway | Kong 3.6 (DB-less, key-auth plugin) |
@@ -63,11 +64,19 @@ Kong API Gateway (:8080)
         │     ├── Nearby Users              :5005  → OutSystems
         │     └── Completed User Hike       :5006  → OutSystems
         │
+        │
         └── Wrappers (external API adapters)
               ├── Weather                   :8005  → Open-Meteo
               ├── Evaluator                 :8006  → OpenAI GPT-4o-mini
               ├── Google Maps               :8007  → Google Maps Platform
               └── Notification              :5050  → Telegram Bot API
+
+RabbitMQ Message Broker (:5672)
+        │
+        ├── hazard_notifications    ← published by Report Ingestion (Scenario 3)
+        └── incident_notifications  ← published by Incident Reporting (Scenario 2)
+                │
+                └── consumed by Notification Wrapper → Telegram dispatch
 ```
 
 ---
@@ -88,18 +97,15 @@ Kong API Gateway (:8080)
 2. GPS coordinates are reverse-geocoded to a human-readable address via Google Maps
 3. Emergency contacts are fetched from OutSystems
 4. Nearby active hikers on the same trail are fetched from OutSystems (isHiking = true)
-5. Telegram alerts are sent to emergency contacts and nearby hikers
+5. Alert payload is published to the `incident_notifications` RabbitMQ queue; Notification Wrapper consumes it and dispatches Telegram messages to emergency contacts and nearby hikers
 6. Incident is persisted to Firestore — visible to all hikers on the same trail via the trail dashboard within 24 hours
 
 ### Scenario 3 — Hazard Reporting & Rerouting
 
-1. Hiker reports a hazard (type, severity 1–5, GPS location, description) on the **Hazard Report** page
+1. Hiker reports a hazard (type, GPS location, description) on the **Hazard Report** page
 2. Hazard is persisted to the Trail Hazards DB via Trail Condition Service (`POST /CreateReport`)
-3. All active hikers on the trail receive a Telegram broadcast notification
-4. Trail operational status is updated based on reported severity:
-   - Severity 4–5 → **CLOSED**
-   - Severity 2–3 → **CAUTION**
-   - Severity 1 → unchanged
+3. Alert payload is published to the `hazard_notifications` RabbitMQ queue; Notification Wrapper consumes it and dispatches Telegram broadcasts to all registered hikers on the trail
+4. Trail operational status is updated to **CAUTION**
 5. OSRM finds candidate alternative walking routes; the route with the greatest deviation from the hazard point is selected
 6. Frontend displays the original and alternative routes on a map with distance and ETA
 
@@ -143,6 +149,27 @@ query TrailDashboard($trailId: String!) {
 ```
 
 The GraphiQL playground is available at `http://localhost:8011/graphql` (direct, bypasses Kong — no API key needed).
+
+---
+
+## RabbitMQ — Async Notification Delivery
+
+Notifications are decoupled from the main request flow using RabbitMQ as a message broker. This means hazard reports and incident alerts return a response to the hiker immediately without waiting for Telegram delivery to complete.
+
+**Queues:**
+
+| Queue | Published by | Consumed by |
+|---|---|---|
+| `hazard_notifications` | Report Ingestion Service | Notification Wrapper |
+| `incident_notifications` | Incident Reporting Service | Notification Wrapper |
+
+**Flow:**
+1. Orchestrator publishes a JSON payload to the appropriate queue (non-blocking, via thread executor)
+2. `Notification_Wrapper` runs a persistent daemon consumer thread that picks up messages and dispatches Telegram alerts
+3. Messages are **durable and persistent** — if the Notification Wrapper restarts, queued messages are not lost and will be processed when it comes back up
+4. If RabbitMQ is unreachable, orchestrators automatically **fall back to direct HTTP** (`/broadcast` or `/notify`) so the notification flow never breaks
+
+**Management UI:** `http://localhost:15672` — login `guest` / `guest`
 
 ---
 
@@ -253,6 +280,7 @@ docker compose up --build
 | Kong gateway | http://localhost:8080 |
 | Konga (Kong UI) | http://localhost:1337 |
 | GraphiQL playground | http://localhost:8011/graphql |
+| RabbitMQ management UI | http://localhost:15672 (guest / guest) |
 
 ### 3. Local frontend development (optional)
 
@@ -314,3 +342,4 @@ Manual registration is also supported: send `/register <userId> +65XXXXXXXX` in 
 
 - **Konga** at `http://localhost:1337` — visual Kong admin UI for inspecting routes, consumers, plugins, and logs; connect to `http://kong:8001` on first login
 - **Kong access logs** are written to `/tmp/kong-access.log` inside the Kong container
+- **RabbitMQ Management UI** at `http://localhost:15672` (guest / guest) — inspect queues (`hazard_notifications`, `incident_notifications`), message rates, and consumer connections in real time
