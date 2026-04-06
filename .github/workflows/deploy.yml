@@ -25,8 +25,6 @@ jobs:
 
       - name: Build and push all backend images
         run: |
-          # Override the az acr login in 02-build-push.sh — we already logged in above.
-          # Patch: skip the az acr login line and run the rest of the script.
           ACR="trailguardt06acr.azurecr.io"
 
           push() {
@@ -39,23 +37,23 @@ jobs:
             docker push "$ACR/$name:latest"
           }
 
-          push hiker-profile       Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Hiker_Profile_Service
-          push trail-condition     Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Trail_Condition_Service
-          push incident-risk       Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Incident_Risk_Service
-          push hike-completion     Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Hike_Completion_Service
-          push incident-service    Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Trail_Incident
-          push emergency-contacts  Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Emergency_Contacts_Service
-          push nearby-users        Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Nearby_Users_Service
-          push completed-user-hike Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Completed_User_Hike_Service
-          push weather-wrapper     Services         Services/wrappers/Dockerfile    --build-arg SERVICE=Weather_Wrapper
-          push evaluator-wrapper   Services         Services/wrappers/Dockerfile    --build-arg SERVICE=Evaluator_Wrapper
-          push googlemaps-wrapper  Services         Services/wrappers/Dockerfile    --build-arg SERVICE=GoogleMaps_Wrapper
-          push notification-wrapper Services        Services/Dockerfile.notification
-          push orchestrator        Services         Services/orchestrator/Dockerfile
-          push incident-reporting  Services         Services/orchestrator/Dockerfile
-          push report-ingestion    Services         Services/orchestrator/Dockerfile
-          push alternative-route   Services         Services/orchestrator/Dockerfile
-          push trail-query         Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Trail_Query_Service
+          push hiker-profile        Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Hiker_Profile_Service
+          push trail-condition      Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Trail_Condition_Service
+          push incident-risk        Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Incident_Risk_Service
+          push hike-completion      Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Hike_Completion_Service
+          push incident-service     Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Trail_Incident
+          push emergency-contacts   Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Emergency_Contacts_Service
+          push nearby-users         Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Nearby_Users_Service
+          push completed-user-hike  Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Completed_User_Hike_Service
+          push weather-wrapper      Services         Services/wrappers/Dockerfile    --build-arg SERVICE=Weather_Wrapper
+          push evaluator-wrapper    Services         Services/wrappers/Dockerfile    --build-arg SERVICE=Evaluator_Wrapper
+          push googlemaps-wrapper   Services         Services/wrappers/Dockerfile    --build-arg SERVICE=GoogleMaps_Wrapper
+          push notification-wrapper Services         Services/Dockerfile.notification
+          push orchestrator         Services         Services/orchestrator/Dockerfile
+          push incident-reporting   Services         Services/orchestrator/Dockerfile
+          push report-ingestion     Services         Services/orchestrator/Dockerfile
+          push alternative-route    Services         Services/orchestrator/Dockerfile
+          push trail-query          Services/atomic  Services/atomic/Dockerfile      --build-arg SERVICE=Trail_Query_Service
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v3
@@ -71,8 +69,57 @@ jobs:
           mkdir -p Services
           echo "${{ secrets.SERVICES_ENV }}" > Services/.env
 
-      - name: Deploy to AKS
+      - name: Deploy backend + Kong to AKS
         run: bash scripts/03-deploy.sh
-        # Note: --with-frontend excluded — frontend requires Kong's external IP
-        # baked in at build time. Rebuild manually:
-        #   bash scripts/02-build-push.sh --with-frontend <KONG_IP>
+
+      - name: Wait for Kong external IP
+        id: kong_ip
+        run: |
+          echo "Waiting for Kong LoadBalancer IP (up to 5 minutes)..."
+          for i in $(seq 1 30); do
+            IP=$(kubectl get svc kong -n trailguard \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            if [[ -n "$IP" ]]; then
+              echo "Kong IP: $IP"
+              echo "ip=$IP" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "  attempt $i/30 — no IP yet, waiting 10s..."
+            sleep 10
+          done
+          echo "ERROR: Timed out waiting for Kong external IP"
+          exit 1
+
+      - name: Build and push frontend with Kong IP
+        run: |
+          ACR="trailguardt06acr.azurecr.io"
+          KONG_IP="${{ steps.kong_ip.outputs.ip }}"
+          echo "Building frontend for http://$KONG_IP"
+          docker build --platform linux/amd64 \
+            -t "$ACR/frontend:latest" \
+            -f Frontend/Dockerfile \
+            --build-arg VITE_FIREBASE_API_KEY="${{ secrets.VITE_FIREBASE_API_KEY }}" \
+            --build-arg VITE_FIREBASE_AUTH_DOMAIN="${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}" \
+            --build-arg VITE_FIREBASE_PROJECT_ID="${{ secrets.VITE_FIREBASE_PROJECT_ID }}" \
+            --build-arg VITE_FIREBASE_STORAGE_BUCKET="${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}" \
+            --build-arg VITE_FIREBASE_MESSAGING_SENDER_ID="${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}" \
+            --build-arg VITE_FIREBASE_APP_ID="${{ secrets.VITE_FIREBASE_APP_ID }}" \
+            --build-arg VITE_FIREBASE_MEASUREMENT_ID="${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}" \
+            --build-arg VITE_GOOGLE_MAPS_API_KEY="${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}" \
+            --build-arg VITE_KONG_API_KEY="${{ secrets.VITE_KONG_API_KEY }}" \
+            --build-arg VITE_KONG_BASE_URL="http://$KONG_IP" \
+            --build-arg VITE_MAPS_WRAPPER_URL="http://$KONG_IP/api/maps" \
+            --build-arg VITE_TRAIL_QUERY_URL="http://$KONG_IP/api/trail-query" \
+            Frontend/
+          docker push "$ACR/frontend:latest"
+
+      - name: Deploy frontend to AKS
+        run: bash scripts/03-deploy.sh --with-frontend
+
+      - name: Summary
+        run: |
+          echo "=== Deployment complete ==="
+          echo "Kong external IP: ${{ steps.kong_ip.outputs.ip }}"
+          echo "Frontend URL:     http://${{ steps.kong_ip.outputs.ip }}"
+          kubectl get pods -n trailguard
+          kubectl get svc -n trailguard
