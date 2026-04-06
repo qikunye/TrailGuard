@@ -20,14 +20,8 @@ kubectl apply -f k8s/01-configmap-kong.yaml
 echo "=== [3] Creating secrets from Services/.env ==="
 bash k8s/02-secrets.sh
 
-echo "=== [3b] Deploying RabbitMQ ==="
-kubectl apply -f k8s/02b-rabbitmq.yaml
-
 echo "=== [4] Deploying atomic services ==="
 kubectl apply -f k8s/03-atomic-services.yaml
-
-echo "=== [4b] Applying notification PVC ==="
-kubectl apply -f k8s/10-notification-pvc.yaml
 
 echo "=== [5] Deploying wrapper services ==="
 kubectl apply -f k8s/04-wrapper-services.yaml

@@ -105,8 +105,6 @@ spec:
               value: "http://nearby-users:5005"
             - name: TRAIL_INCIDENT_URL
               value: "http://incident-service:5004"
-            - name: RABBITMQ_URL
-              value: "amqp://guest:guest@rabbitmq:5672/"
           envFrom:
             - secretRef:
                 name: trailguard-secrets
@@ -172,8 +170,6 @@ spec:
               value: "http://alternative-route:8009"
             - name: NEARBY_USERS_URL
               value: "http://nearby-users:5005"
-            - name: RABBITMQ_URL
-              value: "amqp://guest:guest@rabbitmq:5672/"
           envFrom:
             - secretRef:
                 name: trailguard-secrets
