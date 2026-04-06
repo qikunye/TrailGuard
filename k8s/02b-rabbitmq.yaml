@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  namespace: trailguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3.13-alpine
+          ports:
+            - containerPort: 5672
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              value: "guest"
+            - name: RABBITMQ_DEFAULT_PASS
+              value: "guest"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "ping"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: trailguard
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - port: 5672
+      targetPort: 5672
+  type: ClusterIP

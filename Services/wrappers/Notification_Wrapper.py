@@ -25,10 +25,6 @@ import threading
 import requests as http_requests
 import pika
 from flask import Flask, request, jsonify
-from dotenv import load_dotenv
-
-load_dotenv("notification.env")
-
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("NotificationWrapper")
 
