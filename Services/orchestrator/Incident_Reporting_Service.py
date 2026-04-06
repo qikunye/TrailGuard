@@ -255,6 +255,7 @@ async def report_incident(req: IncidentRequest):
             alert_payload = {
                 "hikerId":           str(req.userId),
                 "hikerName":         hiker_display,
+                "hikerPhone":        req.hikerPhone,
                 "address":           address,
                 "lat":               req.lat,
                 "lng":               req.lng,

@@ -277,6 +277,18 @@ def notify():
 
         tg_sent = sum(1 for r in tg_results if r["telegramStatus"] == "sent")
 
+        # ── Telegram: hiker self-confirmation ─────────────────────────────────
+        hiker_phone = data.get("hikerPhone")
+        if hiker_phone:
+            tg_send_to_recipient(hiker_phone, user_id=data.get("hikerId"), text=(
+                f"✅ <b>Emergency Report Received</b>\n\n"
+                f"Your emergency has been reported and help is on the way.\n\n"
+                f"📍 <b>Location:</b> {address}\n\n"
+                f"<b>Emergency contacts notified:</b> {len(data['emergencyContacts'])}\n"
+                f"<b>Nearby hikers notified:</b> {len(data['nearbyHikers'])}\n\n"
+                f"Stay where you are and keep your phone visible."
+            ))
+
         if not silent:
             tg_send_to_admin(
                 f"🚨 <b>Emergency Alert Dispatched</b>\n\n"
@@ -453,6 +465,18 @@ def _dispatch_incident(data: dict):
             f"If you are nearby, please assist or alert park staff."
         ))
         tg_results.append({"to": phone or str(user_id), "role": "nearbyHiker", "sent": sent})
+
+    # ── Hiker self-confirmation ───────────────────────────────────────────────
+    hiker_phone = data.get("hikerPhone")
+    if hiker_phone:
+        tg_send_to_recipient(hiker_phone, user_id=data.get("hikerId"), text=(
+            f"✅ <b>Emergency Report Received</b>\n\n"
+            f"Your emergency has been reported and help is on the way.\n\n"
+            f"📍 <b>Location:</b> {address}\n\n"
+            f"<b>Emergency contacts notified:</b> {len(data.get('emergencyContacts', []))}\n"
+            f"<b>Nearby hikers notified:</b> {len(data.get('nearbyHikers', []))}\n\n"
+            f"Stay where you are and keep your phone visible."
+        ))
 
     tg_send_to_admin(
         f"🚨 <b>Emergency Alert Dispatched</b>\n\n"
