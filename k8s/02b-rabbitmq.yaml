@@ -35,6 +35,7 @@ spec:
               command: ["rabbitmq-diagnostics", "ping"]
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 10
             failureThreshold: 6
 ---
 apiVersion: v1

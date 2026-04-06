@@ -348,6 +348,24 @@ data:
               key_names: [X-API-Key]
               hide_credentials: true
 
+      - name: trail-query
+        url: http://trail-query:8011
+        connect_timeout: 10000
+        read_timeout: 30000
+        write_timeout: 30000
+        routes:
+          - name: trail-query-route
+            paths:
+              - /api/trail-query
+            strip_path: true
+            methods: [GET, POST, OPTIONS]
+            preserve_host: false
+        plugins:
+          - name: key-auth
+            config:
+              key_names: [X-API-Key]
+              hide_credentials: true
+
       - name: frontend
         url: http://frontend:80
         connect_timeout: 10000

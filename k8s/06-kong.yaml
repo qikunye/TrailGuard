@@ -22,6 +22,8 @@ spec:
           ports:
             - name: proxy
               containerPort: 8000
+            - name: proxy-ssl
+              containerPort: 8443
             - name: admin
               containerPort: 8001
           env:
@@ -40,7 +42,11 @@ spec:
             - name: KONG_ADMIN_LISTEN
               value: "0.0.0.0:8001"
             - name: KONG_PROXY_LISTEN
-              value: "0.0.0.0:8000"
+              value: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+            - name: KONG_SSL_CERT
+              value: /kong-tls/tls.crt
+            - name: KONG_SSL_CERT_KEY
+              value: /kong-tls/tls.key
             - name: KONG_PROXY_READ_TIMEOUT
               value: "120000"
             - name: KONG_PROXY_WRITE_TIMEOUT
@@ -50,6 +56,9 @@ spec:
           volumeMounts:
             - name: kong-config
               mountPath: /kong
+              readOnly: true
+            - name: kong-tls
+              mountPath: /kong-tls
               readOnly: true
           resources:
             requests:
@@ -74,6 +83,9 @@ spec:
         - name: kong-config
           configMap:
             name: kong-config
+        - name: kong-tls
+          secret:
+            secretName: kong-tls
 
 # ─── Kong Proxy Service (public — LoadBalancer) ───────────────────────────────
 # This is your single public entry point. The external IP assigned here
@@ -92,6 +104,9 @@ spec:
     - name: proxy
       port: 80
       targetPort: 8000
+    - name: proxy-ssl
+      port: 443
+      targetPort: 8443
 
 # ─── Kong Admin Service (internal only — ClusterIP) ───────────────────────────
 # Never expose port 8001 publicly. Used only by Prometheus scraping inside the cluster.
