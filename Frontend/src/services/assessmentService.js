@@ -25,7 +25,12 @@ export async function getTrailAssessment({ userId, trailId, plannedDate, planned
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Assessment failed (HTTP ${res.status})`);
+    const detail = typeof err.detail === "string"
+      ? err.detail
+      : Array.isArray(err.detail)
+        ? err.detail.map(d => d.msg || JSON.stringify(d)).join("; ")
+        : `Assessment failed (HTTP ${res.status})`;
+    throw new Error(detail);
   }
   return res.json();
 }

@@ -316,14 +316,11 @@ async def evaluate(req: EvaluationRequest):
             resp.raise_for_status()
             openai_data = resp.json()
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                log.warning("OpenAI quota exceeded (429) — using rule-based fallback")
-                return _rule_based_evaluate(req)
-            log.error("OpenAI API HTTP error: %s – %s", e.response.status_code, e.response.text)
-            raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.response.status_code}")
+            log.warning("OpenAI API error (HTTP %s) — using rule-based fallback", e.response.status_code)
+            return _rule_based_evaluate(req)
         except httpx.RequestError as e:
-            log.error("OpenAI API connection error: %s", e)
-            raise HTTPException(status_code=503, detail="Cannot reach OpenAI API.")
+            log.warning("OpenAI API unreachable — using rule-based fallback: %s", e)
+            return _rule_based_evaluate(req)
 
     try:
         raw_text = openai_data["choices"][0]["message"]["content"]
