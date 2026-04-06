@@ -19,6 +19,10 @@ services:
       KONG_PROXY_READ_TIMEOUT: "120000"
       KONG_PROXY_WRITE_TIMEOUT: "120000"
       KONG_PROXY_CONNECT_TIMEOUT: "10000"
+      # Re-resolve Docker service hostnames every 10s so container IP changes
+      # after restarts don't cause stale-IP "Connection refused" errors
+      KONG_DNS_ORDER: "LAST,A,CNAME"
+      KONG_DNS_STALE_TTL: "10"
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
     ports:

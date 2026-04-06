@@ -219,7 +219,7 @@ export default function TrailRegistrationPage() {
   // ── Read profile (scoped to current Firebase user) ────────────────────────
   const { profile: hikerProfile, uid } = useProfile();
 
-  const userId      = hikerProfile.userId || "usr_001";
+  const userId      = String(hikerProfile.userId || "usr_001");
   const declaredExp = deriveExpLevel(Number(hikerProfile.totalHikesCompleted) || 0);
   const selectedTrail = trails.find(t => t.trailId === form.selectedTrailId);
 
