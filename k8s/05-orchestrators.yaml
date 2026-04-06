@@ -168,8 +168,6 @@ spec:
               value: "http://notification-wrapper:5050"
             - name: ALTERNATIVE_ROUTE_URL
               value: "http://alternative-route:8009"
-            - name: NEARBY_USERS_URL
-              value: "http://nearby-users:5005"
           envFrom:
             - secretRef:
                 name: trailguard-secrets

@@ -316,8 +316,8 @@ async def evaluate(req: EvaluationRequest):
             resp.raise_for_status()
             openai_data = resp.json()
         except httpx.HTTPStatusError as e:
-            if e.response.status_code in (429, 403):
-                log.warning("OpenAI unavailable (status=%s) — using rule-based fallback", e.response.status_code)
+            if e.response.status_code == 429:
+                log.warning("OpenAI quota exceeded (429) — using rule-based fallback")
                 return _rule_based_evaluate(req)
             log.error("OpenAI API HTTP error: %s – %s", e.response.status_code, e.response.text)
             raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.response.status_code}")
