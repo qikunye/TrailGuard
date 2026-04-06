@@ -1,0 +1,14 @@
+# Persistent storage for the Telegram phone→chat_id registry
+# Survives pod restarts so users don't need to re-register after deployments
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: telegram-registry-pvc
+  namespace: trailguard
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 64Mi
